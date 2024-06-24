@@ -28,8 +28,8 @@
  * level tree.
  */
 
-/* Non-macro version of header location routine */
-GC_INNER hdr * GC_find_header(ptr_t h)
+/* A non-macro version of header location routine.      */
+GC_INNER hdr * GC_find_header(const void * h)
 {
 #   ifdef HASH_TL
         hdr * result;
@@ -326,7 +326,7 @@ GC_INNER void GC_remove_counts(struct hblk *h, size_t sz /* bytes */)
 }
 
 GC_API void GC_CALL GC_apply_to_all_blocks(GC_walk_hblk_fn fn,
-                                           GC_word client_data)
+                                           void *client_data)
 {
     signed_word j;
     bottom_index * index_p;
@@ -334,21 +334,21 @@ GC_API void GC_CALL GC_apply_to_all_blocks(GC_walk_hblk_fn fn,
     for (index_p = GC_all_bottom_indices; index_p != NULL;
          index_p = index_p -> asc_link) {
         for (j = BOTTOM_SZ-1; j >= 0;) {
-            if (!IS_FORWARDING_ADDR_OR_NIL(index_p->index[j])) {
-                if (!HBLK_IS_FREE(index_p->index[j])) {
-                    (*fn)(((struct hblk *)
-                              (((index_p->key << LOG_BOTTOM_SZ) + (word)j)
-                               << LOG_HBLKSIZE)),
-                          client_data);
+            if (!IS_FORWARDING_ADDR_OR_NIL(index_p -> index[j])) {
+                if (!HBLK_IS_FREE(index_p -> index[j])) {
+                    fn((struct hblk *)
+                              (((index_p -> key << LOG_BOTTOM_SZ) + (word)j)
+                               << LOG_HBLKSIZE),
+                       client_data);
                 }
                 j--;
-             } else if (index_p->index[j] == 0) {
+            } else if (NULL == index_p -> index[j]) {
                 j--;
-             } else {
-                j -= (signed_word)(index_p->index[j]);
-             }
-         }
-     }
+            } else {
+                j -= (signed_word)(index_p -> index[j]);
+            }
+        }
+    }
 }
 
 GC_INNER struct hblk * GC_next_block(struct hblk *h, GC_bool allow_free)

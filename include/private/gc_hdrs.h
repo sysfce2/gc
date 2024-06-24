@@ -132,7 +132,7 @@ typedef struct bi {
     struct bi * asc_link;       /* All indices are linked in    */
                                 /* ascending order...           */
     struct bi * desc_link;      /* ... and in descending order. */
-    word key;                   /* high order address bits.     */
+    word key;                   /* High-order address bits.     */
 # ifdef HASH_TL
     struct bi * hash_link;      /* Hash chain link.             */
 # endif
@@ -143,9 +143,9 @@ typedef struct bi {
 /* extern bottom_index * GC_top_index []; - really part of GC_arrays */
                                 /* Each entry points to a bottom_index. */
                                 /* On a 32 bit machine, it points to    */
-                                /* the index for a set of high order    */
+                                /* the index for a set of high-order    */
                                 /* bits equal to the index.  For longer */
-                                /* addresses, we hash the high order    */
+                                /* addresses, we hash the high-order    */
                                 /* bits to compute the index in         */
                                 /* GC_top_index, and each entry points  */
                                 /* to a hash chain.                     */
@@ -161,7 +161,7 @@ typedef struct bi {
 # define BI(p) GC_top_index[ADDR(p) >> (LOG_BOTTOM_SZ + LOG_HBLKSIZE)]
 # define HDR_INNER(p) HDR_FROM_BI(BI(p),p)
 # ifdef SMALL_CONFIG
-#     define HDR(p) GC_find_header((ptr_t)(p))
+#     define HDR(p) GC_find_header(p)
 # else
 #     define HDR(p) HDR_INNER(p)
 # endif
@@ -200,7 +200,7 @@ typedef struct bi {
           GC_ASSERT(bi != GC_all_nils); \
           HDR_FROM_BI(bi, p) = (hhdr); \
         } while (0)
-# define HDR(p) GC_find_header((ptr_t)(p))
+# define HDR(p) GC_find_header(p)
 #endif
 
 /* Is the result a forwarding address to someplace closer to the        */

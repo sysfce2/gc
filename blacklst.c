@@ -51,7 +51,7 @@ STATIC void GC_clear_bl(word *);
 GC_INNER void GC_default_print_heap_obj_proc(ptr_t p)
 {
     ptr_t base = (ptr_t)GC_base(p);
-    int kind = HDR(base)->hb_obj_kind;
+    int kind = HDR(base) -> hb_obj_kind;
 
     GC_err_printf("object at %p of appr. %lu bytes (%s)\n",
                   (void *)base, (unsigned long)GC_size(base),
@@ -86,11 +86,11 @@ GC_INNER void (*GC_print_heap_obj)(ptr_t p) = GC_default_print_heap_obj_proc;
 GC_INNER void GC_bl_init_no_interiors(void)
 {
   GC_ASSERT(I_HOLD_LOCK());
-  if (GC_incomplete_normal_bl == 0) {
+  if (NULL == GC_incomplete_normal_bl) {
     GC_old_normal_bl = (word *)GC_scratch_alloc(sizeof(page_hash_table));
     GC_incomplete_normal_bl = (word *)GC_scratch_alloc(
                                                   sizeof(page_hash_table));
-    if (GC_old_normal_bl == 0 || GC_incomplete_normal_bl == 0) {
+    if (NULL == GC_old_normal_bl || NULL == GC_incomplete_normal_bl) {
       GC_err_printf("Insufficient memory for black list\n");
       EXIT();
     }
@@ -108,7 +108,7 @@ GC_INNER void GC_bl_init(void)
     GC_ASSERT(NULL == GC_old_stack_bl && NULL == GC_incomplete_stack_bl);
     GC_old_stack_bl = (word *)GC_scratch_alloc(sizeof(page_hash_table));
     GC_incomplete_stack_bl = (word *)GC_scratch_alloc(sizeof(page_hash_table));
-    if (GC_old_stack_bl == 0 || GC_incomplete_stack_bl == 0) {
+    if (NULL == GC_old_stack_bl || NULL == GC_incomplete_stack_bl) {
         GC_err_printf("Insufficient memory for black list\n");
         EXIT();
     }
@@ -116,9 +116,9 @@ GC_INNER void GC_bl_init(void)
     GC_clear_bl(GC_incomplete_stack_bl);
 }
 
-STATIC void GC_clear_bl(word *doomed)
+STATIC void GC_clear_bl(word *bl)
 {
-    BZERO(doomed, sizeof(page_hash_table));
+    BZERO(bl, sizeof(page_hash_table));
 }
 
 STATIC void GC_copy_bl(const word *old, word *dest)
@@ -198,7 +198,8 @@ GC_INNER void GC_unpromote_black_lists(void)
   if (GC_modws_valid_offsets[p & (sizeof(word)-1)]) {
     word index = PHT_HASH(p);
 
-    if (HDR(p) == 0 || get_pht_entry_from_index(GC_old_normal_bl, index)) {
+    if (NULL == HDR((ptr_t)p)
+        || get_pht_entry_from_index(GC_old_normal_bl, index)) {
 #     ifdef PRINT_BLACK_LIST
         if (!get_pht_entry_from_index(GC_incomplete_normal_bl, index)) {
           GC_print_blacklisted_ptr(p, source, "normal");
@@ -222,7 +223,8 @@ GC_INNER void GC_unpromote_black_lists(void)
 # ifndef PARALLEL_MARK
     GC_ASSERT(I_HOLD_LOCK());
 # endif
-  if (HDR(p) == 0 || get_pht_entry_from_index(GC_old_stack_bl, index)) {
+  if (NULL == HDR((ptr_t)p)
+      || get_pht_entry_from_index(GC_old_stack_bl, index)) {
 #   ifdef PRINT_BLACK_LIST
       if (!get_pht_entry_from_index(GC_incomplete_stack_bl, index)) {
         GC_print_blacklisted_ptr(p, source, "stack");
@@ -240,11 +242,10 @@ GC_INNER void GC_unpromote_black_lists(void)
 /* the structure of the black list hash tables.  Assumes the allocator  */
 /* lock is held but no assertion about it by design.                    */
 GC_API struct GC_hblk_s *GC_CALL GC_is_black_listed(struct GC_hblk_s *h,
-                                                    GC_word len)
+                                                    size_t len)
 {
-    word index = PHT_HASH(h);
-    word i;
-    word nblocks;
+    size_t index = (size_t)PHT_HASH(h);
+    size_t i, nblocks;
 
     if (!GC_all_interior_pointers
         && (get_pht_entry_from_index(GC_old_normal_bl, index)
@@ -257,7 +258,7 @@ GC_API struct GC_hblk_s *GC_CALL GC_is_black_listed(struct GC_hblk_s *h,
         if (GC_old_stack_bl[divWORDSZ(index)] == 0
             && GC_incomplete_stack_bl[divWORDSZ(index)] == 0) {
           /* An easy case. */
-          i += (word)CPP_WORDSZ - modWORDSZ(index);
+          i += CPP_WORDSZ - modWORDSZ(index);
         } else {
           if (get_pht_entry_from_index(GC_old_stack_bl, index)
               || get_pht_entry_from_index(GC_incomplete_stack_bl, index)) {
@@ -266,7 +267,7 @@ GC_API struct GC_hblk_s *GC_CALL GC_is_black_listed(struct GC_hblk_s *h,
           i++;
         }
         if (i >= nblocks) break;
-        index = PHT_HASH(h + i);
+        index = (size_t)PHT_HASH(h + i);
     }
     return NULL;
 }

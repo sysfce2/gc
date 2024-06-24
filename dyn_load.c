@@ -190,7 +190,7 @@ STATIC GC_has_static_roots_func GC_has_static_roots = 0;
         dynStructureAddr = &_DYNAMIC;
 #   endif
 
-    if (0 == COVERT_DATAFLOW(dynStructureAddr)) {
+    if (0 == COVERT_DATAFLOW(ADDR(dynStructureAddr))) {
         /* _DYNAMIC symbol not resolved. */
         return NULL;
     }
@@ -322,7 +322,7 @@ STATIC void GC_register_map_entries(const char *maps)
                   && ADDR(end) == 0xc30000000000UL && path[0] == '\n')
                 continue; /* discard some special mapping */
 #           endif
-            if (path[0] == '[' && strncmp(path+1, "heap]", 5) != 0)
+            if (path[0] == '[' && strncmp(path + 1, "heap]", 5) != 0)
               continue; /* discard if a pseudo-path unless "[heap]" */
 
 #           ifdef THREADS
@@ -528,7 +528,7 @@ STATIC int GC_register_dynlib_callback(struct dl_phdr_info * info,
         for (j = n_load_segs; --j >= 0; ) {
           if (ADDR_INSIDE(start, load_segs[j].start, load_segs[j].end)) {
             if (load_segs[j].start2 != NULL) {
-              WARN("More than one GNU_RELRO segment per load one\n",0);
+              WARN("More than one GNU_RELRO segment per load one\n", 0);
             } else {
               GC_ASSERT(ADDR_GE(PTR_ALIGN_UP(load_segs[j].end, GC_page_size),
                                 end));
@@ -563,7 +563,7 @@ GC_INNER GC_bool GC_register_main_static_data(void)
     /* zero (otherwise a compiler might issue a warning).               */
     return FALSE;
 # else
-    return 0 == COVERT_DATAFLOW(dl_iterate_phdr);
+    return 0 == COVERT_DATAFLOW(ADDR(dl_iterate_phdr));
 # endif
 }
 
@@ -605,10 +605,10 @@ STATIC GC_bool GC_register_dynamic_libraries_dl_iterate_phdr(void)
   } else {
       ptr_t datastart, dataend;
 #     ifdef DATASTART_IS_FUNC
-        static ptr_t datastart_cached = (ptr_t)GC_WORD_MAX;
+        static ptr_t datastart_cached = MAKE_CPTR(GC_WORD_MAX);
 
         /* Evaluate DATASTART only once.  */
-        if (datastart_cached == (ptr_t)GC_WORD_MAX) {
+        if (ADDR(datastart_cached) == GC_WORD_MAX) {
           datastart_cached = DATASTART;
         }
         datastart = datastart_cached;
@@ -694,7 +694,7 @@ GC_FirstDLOpenedLinkMap(void)
 {
     static struct link_map *cachedResult = 0;
 
-    if (0 == COVERT_DATAFLOW(_DYNAMIC)) {
+    if (0 == COVERT_DATAFLOW(ADDR(_DYNAMIC))) {
         /* _DYNAMIC symbol not resolved. */
         return NULL;
     }
@@ -774,9 +774,9 @@ GC_INNER void GC_register_dynamic_libraries(void)
         }
 #       if defined(CPPCHECK) && defined(HOST_ANDROID) \
            && !defined(GC_DONT_DEFINE_LINK_MAP) && !(__ANDROID_API__ >= 21)
-          NOOP1_PTR(lm -> l_name);
+          GC_noop1_ptr(lm -> l_name);
           GC_noop1((word)(lm -> l_ld));
-          NOOP1_PTR(lm -> l_prev);
+          GC_noop1_ptr(lm -> l_prev);
 #       endif
     }
 }
@@ -1490,13 +1490,13 @@ GC_INNER void GC_init_dyld(void)
 #   endif
 #   ifndef USE_DYLD_TO_BIND
       {
-        const void *dl_handle = dlopen(NULL, RTLD_NOW);
+        void *dl_handle = dlopen(NULL, RTLD_NOW);
 
         if (!dl_handle)
           ABORT("dlopen failed (to bind fully image)");
         /* Note that the handle is never closed.        */
-#       ifdef LINT2
-          NOOP1_PTR(dl_handle);
+#       if defined(CPPCHECK) || defined(LINT2)
+          GC_noop1_ptr(dl_handle);
 #       endif
       }
 #   else

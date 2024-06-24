@@ -197,7 +197,7 @@ GC_INNER const char * GC_get_maps(void)
             while (maps_size >= maps_buf_sz) {
 #             ifdef LINT2
                 /* Workaround passing tainted maps_buf to a tainted sink. */
-                NOOP1_PTR(maps_buf);
+                GC_noop1_ptr(maps_buf);
 #             else
                 GC_scratch_recycle_no_gww(maps_buf, maps_buf_sz);
 #             endif
@@ -443,12 +443,12 @@ GC_INNER const char * GC_get_maps(void)
       /* code is put into a shared library (directly or indirectly) */
       /* which is linked with -Bsymbolic-functions option.  Thus,   */
       /* the following is not used by default.                      */
-      if (COVERT_DATAFLOW(__data_start) != 0) {
+      if (COVERT_DATAFLOW(ADDR(__data_start)) != 0) {
         GC_data_start = (ptr_t)(__data_start);
       } else {
         GC_data_start = (ptr_t)(data_start);
       }
-      if (COVERT_DATAFLOW(GC_data_start) != 0) {
+      if (COVERT_DATAFLOW(ADDR(GC_data_start)) != 0) {
         if (ADDR_LT(data_end, GC_data_start))
           ABORT_ARG2("Wrong __data_start/_end pair",
                      ": %p .. %p", (void *)GC_data_start, (void *)data_end);
@@ -557,7 +557,7 @@ GC_INNER const char * GC_get_maps(void)
         result = result + pgsz;
                     /* no overflow expected; do not use compound        */
                     /* assignment with volatile-qualified left operand  */
-        GC_noop1((word)(*result));
+        GC_noop1((word)(unsigned char)(*result));
       }
     }
 
@@ -566,7 +566,7 @@ GC_INNER const char * GC_get_maps(void)
   }
 #endif /* OPENBSD */
 
-# ifdef OS2
+#ifdef OS2
 
 # include <stddef.h>
 
@@ -649,7 +649,7 @@ struct o32_obj {
 # define INCL_DOSPROCESS
 # include <os2.h>
 
-# endif /* OS/2 */
+#endif /* OS2 */
 
 /* Find the page size.  */
 GC_INNER size_t GC_page_size = 0;
@@ -936,7 +936,7 @@ GC_INNER void GC_setpagesize(void)
 #         endif
 #       endif /* !USE_SEGV_SIGACT */
 #       if defined(CPPCHECK) && defined(ADDRESS_SANITIZER)
-          NOOP1_PTR(&__asan_default_options);
+          GC_noop1((word)(GC_funcptr_uint)&__asan_default_options);
 #       endif
     }
 #endif /* NEED_FIND_LIMIT || UNIX_LIKE || WRAP_MARK_SOME */
@@ -1021,7 +1021,7 @@ GC_INNER void GC_setpagesize(void)
                         /* no underflow expected; do not use compound       */
                         /* assignment with volatile-qualified left operand  */
                 }
-                GC_noop1((word)(*result));
+                GC_noop1((word)(unsigned char)(*result));
             }
         }
         GC_reset_fault_handler();
@@ -1031,7 +1031,7 @@ GC_INNER void GC_setpagesize(void)
     void * GC_find_limit(void * p, int up)
     {
         return GC_find_limit_with_bound((ptr_t)p, (GC_bool)up,
-                                        up ? (ptr_t)GC_WORD_MAX : 0);
+                                        up ? MAKE_CPTR(GC_WORD_MAX) : 0);
     }
 #endif /* NEED_FIND_LIMIT || USE_PROC_FOR_LIBRARIES */
 
@@ -1114,7 +1114,7 @@ GC_INNER void GC_setpagesize(void)
 #         if defined(CPPCHECK)
             /* Workaround a warning that the address of the global  */
             /* symbol (which is a weak one) cannot be null.         */
-            NOOP1_PTR(&p_libc_ia64_register_backing_store_base);
+            GC_noop1_ptr(&p_libc_ia64_register_backing_store_base);
 #         endif
           if (p_libc_ia64_register_backing_store_base != NULL
               && __libc_ia64_register_backing_store_base != NULL) {
@@ -1143,7 +1143,7 @@ GC_INNER void GC_setpagesize(void)
 #     define STAT_BUF_SIZE 4096
     unsigned char stat_buf[STAT_BUF_SIZE];
     int f;
-    word result;
+    word addr;
     ssize_t i, buf_offset = 0, len;
 
     /* First try the easy way.  This should work for glibc 2.2. */
@@ -1155,7 +1155,7 @@ GC_INNER void GC_setpagesize(void)
       ptr_t *p_libc_stack_end = &__libc_stack_end;
 
 #     if defined(CPPCHECK)
-        NOOP1_PTR(&p_libc_stack_end);
+        GC_noop1_ptr(&p_libc_stack_end);
 #     endif
       if (p_libc_stack_end != NULL && __libc_stack_end != NULL) {
 #       if defined(IA64)
@@ -1206,11 +1206,10 @@ GC_INNER void GC_setpagesize(void)
     if (buf_offset + i >= len) ABORT("Could not parse /proc/self/stat");
     stat_buf[buf_offset + i] = '\0';
 
-    result = (word)STRTOULL((char*)stat_buf + buf_offset, NULL, 10);
-    if (result < 0x100000 || (result & (sizeof(word) - 1)) != 0)
-      ABORT_ARG1("Absurd stack bottom value",
-                 ": 0x%lx", (unsigned long)result);
-    return (ptr_t)result;
+    addr = (word)STRTOULL((char *)stat_buf + buf_offset, NULL, 10);
+    if (addr < 0x100000 || (addr & (sizeof(word)-1)) != 0)
+      ABORT_ARG1("Absurd stack bottom value", ": 0x%lx", (unsigned long)addr);
+    return MAKE_CPTR(addr);
   }
 #endif /* LINUX_STACKBOTTOM */
 
@@ -1355,7 +1354,7 @@ GC_INNER void GC_setpagesize(void)
 #     endif
 #     if !defined(STACK_GROWS_UP) && !defined(CPPCHECK)
         if (NULL == result)
-          result = (ptr_t)(signed_word)(-sizeof(ptr_t));
+          result = MAKE_CPTR((signed_word)(-sizeof(ptr_t)));
 #     endif
 #   endif
 #   if !defined(CPPCHECK)
@@ -1582,7 +1581,8 @@ GC_INNER void GC_setpagesize(void)
 /* added later then they need to be registered at that point (as we do  */
 /* with SunOS dynamic loading), or GC_mark_roots needs to check for     */
 /* them (as we do with PCR).                                            */
-# ifdef OS2
+
+#ifdef OS2
 
 void GC_register_data_segments(void)
 {
@@ -1618,7 +1618,7 @@ void GC_register_data_segments(void)
     if (myexefile == 0) {
         ABORT_ARG1("Failed to open executable", ": %s", path);
     }
-    if (fread((char *)(&hdrdos), 1, sizeof(hdrdos), myexefile)
+    if (fread((char *)&hdrdos, 1, sizeof(hdrdos), myexefile)
           < sizeof(hdrdos)) {
         ABORT_ARG1("Could not read MSDOS header", " from: %s", path);
     }
@@ -1628,7 +1628,7 @@ void GC_register_data_segments(void)
     if (fseek(myexefile, E_LFANEW(hdrdos), SEEK_SET) != 0) {
         ABORT_ARG1("Bad DOS magic number", " in file: %s", path);
     }
-    if (fread((char *)(&hdr386), 1, sizeof(hdr386), myexefile)
+    if (fread((char *)&hdr386, 1, sizeof(hdr386), myexefile)
           < sizeof(hdr386)) {
         ABORT_ARG1("Could not read OS/2 header", " from: %s", path);
     }
@@ -1647,7 +1647,7 @@ void GC_register_data_segments(void)
     }
     for (nsegs = E32_OBJCNT(hdr386); nsegs > 0; nsegs--) {
       int flags;
-      if (fread((char *)(&seg), 1, sizeof(seg), myexefile) < sizeof(seg)) {
+      if (fread((char *)&seg, 1, sizeof(seg), myexefile) < sizeof(seg)) {
         ABORT_ARG1("Could not read obj table entry", " from file: %s", path);
       }
       flags = O32_FLAGS(seg);
@@ -1663,7 +1663,7 @@ void GC_register_data_segments(void)
     (void)fclose(myexefile);
 }
 
-# else /* !OS2 */
+#else /* !OS2 */
 
 # if defined(GWW_VDB)
 #   ifndef MEM_WRITE_WATCH
@@ -1712,11 +1712,13 @@ void GC_register_data_segments(void)
         }
 #     endif
 
-#     ifdef MSWINRT_FLAVOR
+#     if defined(MSWINRT_FLAVOR) && defined(FUNCPTR_IS_DATAPTR)
         {
           MEMORY_BASIC_INFORMATION memInfo;
-          SIZE_T result = VirtualQuery((void*)(word)GetProcAddress,
-                                       &memInfo, sizeof(memInfo));
+          SIZE_T result
+                    = VirtualQuery(CAST_THRU_UINTPTR(void*, GetProcAddress),
+                                   &memInfo, sizeof(memInfo));
+
           if (result != sizeof(memInfo))
             ABORT("Weird VirtualQuery result");
           hK32 = (HMODULE)memInfo.AllocationBase;
@@ -1979,44 +1981,47 @@ void GC_register_data_segments(void)
 
 # else /* !ANY_MSWIN */
 
-# if (defined(SVR4) || defined(AIX) || defined(DGUX)) && !defined(PCR)
-  ptr_t GC_SysVGetDataStart(size_t max_page_size, ptr_t etext_addr)
-  {
-    word page_offset = ADDR(PTR_ALIGN_UP(etext_addr, sizeof(ptr_t)))
-                        & ((word)max_page_size - 1);
-    volatile ptr_t result = PTR_ALIGN_UP(etext_addr, max_page_size)
-                            + page_offset;
-    /* Note that this isn't equivalent to just adding           */
-    /* max_page_size to &etext if etext is at a page boundary.  */
+#   if (defined(SVR4) || defined(AIX) || defined(DGUX)) && !defined(PCR)
+      ptr_t GC_SysVGetDataStart(size_t max_page_size, ptr_t etext_addr)
+      {
+        word page_offset = ADDR(PTR_ALIGN_UP(etext_addr, sizeof(ptr_t)))
+                            & ((word)max_page_size - 1);
+        volatile ptr_t result = PTR_ALIGN_UP(etext_addr, max_page_size)
+                                + page_offset;
+        /* Note that this is not equivalent to just adding          */
+        /* max_page_size to &etext if etext is at a page boundary.  */
 
-    GC_ASSERT(max_page_size % sizeof(ptr_t) == 0);
-    GC_setup_temporary_fault_handler();
-    if (SETJMP(GC_jmp_buf) == 0) {
-        /* Try writing to the address.  */
-#       ifdef AO_HAVE_fetch_and_add
-          volatile AO_t zero = 0;
-          (void)AO_fetch_and_add((volatile AO_t *)result, zero);
-#       else
-          /* Fallback to non-atomic fetch-and-store.    */
-          char v = *result;
-#         if defined(CPPCHECK)
-            NOOP1_PTR(&v);
+        GC_ASSERT(max_page_size % sizeof(ptr_t) == 0);
+        GC_setup_temporary_fault_handler();
+        if (SETJMP(GC_jmp_buf) == 0) {
+          /* Try writing to the address.    */
+#         ifdef AO_HAVE_fetch_and_add
+            volatile AO_t zero = 0;
+
+            (void)AO_fetch_and_add((volatile AO_t *)result, zero);
+#         else
+            /* Fallback to non-atomic fetch-and-store.  */
+            char v = *result;
+
+#           if defined(CPPCHECK)
+              GC_noop1_ptr(&v);
+#           endif
+            *result = v;
 #         endif
-          *result = v;
-#       endif
-        GC_reset_fault_handler();
-    } else {
-        GC_reset_fault_handler();
-        /* We got here via a longjmp.  The address is not readable.     */
-        /* This is known to happen under Solaris 2.4 + gcc, which place */
-        /* string constants in the text segment, but after etext.       */
-        /* Use plan B.  Note that we now know there is a gap between    */
-        /* text and data segments, so plan A brought us something.      */
-        result = (char *)GC_find_limit(DATAEND, FALSE);
-    }
-    return (/* no volatile */ ptr_t)(word)result;
-  }
-# endif
+          GC_reset_fault_handler();
+        } else {
+          GC_reset_fault_handler();
+          /* We got here via a longjmp.  The address is not readable.   */
+          /* This is known to happen under Solaris 2.4 + gcc, which     */
+          /* places string constants in the text segment, but after     */
+          /* etext.  Use plan B.  Note that we now know there is a gap  */
+          /* between text and data segments, so plan A brought us       */
+          /* something.                                                 */
+          result = (char *)GC_find_limit(DATAEND, FALSE);
+        }
+        return (ptr_t)CAST_AWAY_VOLATILE_PVOID(result);
+      }
+#   endif /* SVR4 || AIX || DGUX */
 
 #ifdef DATASTART_USES_BSDGETDATASTART
 /* It's unclear whether this should be identical to the above, or       */
@@ -2155,7 +2160,7 @@ void GC_register_data_segments(void)
 
 # endif /* !AMIGA && !OPENBSD */
 # endif /* !ANY_MSWIN */
-# endif /* !OS2 */
+#endif /* !OS2 */
 
 /*
  * Auxiliary routines for obtaining memory from OS.
@@ -2336,10 +2341,9 @@ ptr_t GC_unix_get_mem(size_t bytes)
 
 #endif /* !NO_UNIX_GET_MEM */
 
-# ifdef OS2
-
-void * os2_alloc(size_t bytes)
-{
+#ifdef OS2
+  void * os2_alloc(size_t bytes)
+  {
     void * result;
 
     if (DosAllocMem(&result, bytes, (PAG_READ | PAG_WRITE | PAG_COMMIT)
@@ -2351,9 +2355,8 @@ void * os2_alloc(size_t bytes)
     /* DosAllocMem returns memory at 0 address then just retry once.)   */
     if (NULL == result) return os2_alloc(bytes);
     return result;
-}
-
-# endif /* OS2 */
+  }
+#endif /* OS2 */
 
 #ifdef MSWIN_XBOX1
     ptr_t GC_durango_get_mem(size_t bytes)
@@ -2661,7 +2664,7 @@ static void block_unmap_inner(ptr_t start_addr, size_t len)
             ABORT("unmap: mmap() result differs from start_addr");
 #         if defined(CPPCHECK) || defined(LINT2)
             /* Explicitly store the resource handle to a global variable. */
-            NOOP1_PTR(result);
+            GC_noop1_ptr(result);
 #         endif
 #       endif
         GC_unmapped_bytes += len;
@@ -2714,7 +2717,7 @@ GC_INNER void GC_remap(ptr_t start, size_t bytes)
               }
           }
 #         ifdef LINT2
-            NOOP1_PTR(result);
+            GC_noop1_ptr(result);
 #         endif
           GC_ASSERT(GC_unmapped_bytes >= alloc_len);
           GC_unmapped_bytes -= alloc_len;
@@ -2741,7 +2744,7 @@ GC_INNER void GC_remap(ptr_t start, size_t bytes)
           if (result != start_addr)
             ABORT("remap: mmap() result differs from start_addr");
 #         if defined(CPPCHECK) || defined(LINT2)
-            NOOP1_PTR(result);
+            GC_noop1_ptr(result);
 #         endif
 #         undef IGNORE_PAGES_EXECUTABLE
 #       else
@@ -3199,18 +3202,19 @@ GC_API GC_push_other_roots_proc GC_CALL GC_get_push_other_roots(void)
   /* should not be harmful because the added or removed header should   */
   /* be already unprotected.                                            */
   GC_ATTR_NO_SANITIZE_THREAD
-  static GC_bool is_header_found_async(void *addr)
+  static GC_bool is_header_found_async(const void *p)
   {
 #   ifdef HASH_TL
       hdr *result;
-      GET_HDR((ptr_t)addr, result);
+
+      GET_HDR(p, result);
       return result != NULL;
 #   else
-      return HDR_INNER(addr) != NULL;
+      return HDR_INNER(p) != NULL;
 #   endif
   }
 #else
-# define is_header_found_async(addr) (HDR(addr) != NULL)
+# define is_header_found_async(p) (HDR(p) != NULL)
 #endif /* !THREADS */
 
 #ifndef DARWIN
@@ -3275,7 +3279,7 @@ GC_API GC_push_other_roots_proc GC_CALL GC_get_push_other_roots(void)
 #   if !defined(MSWIN32) && !defined(MSWINCE)
         char *addr = (char *)si->si_addr;
 #   else
-        char * addr = (char *) (exc_info -> ExceptionRecord
+        char *addr = (char *)(exc_info -> ExceptionRecord
                                 -> ExceptionInformation[1]);
 #   endif
 
@@ -3499,7 +3503,7 @@ GC_API GC_push_other_roots_proc GC_CALL GC_get_push_other_roots(void)
 #     endif
 #   endif /* !MSWIN32 && !MSWINCE */
 #   if defined(CPPCHECK) && defined(ADDRESS_SANITIZER)
-      NOOP1_PTR(&__asan_default_options);
+      GC_noop1((word)(GC_funcptr_uint)&__asan_default_options);
 #   endif
     return TRUE;
   }
@@ -4266,10 +4270,9 @@ GC_INNER GC_bool GC_dirty_init(void)
 #       endif
         ) {
       if (!output_unneeded)
-        BCOPY((/* no volatile */ void *)(word)GC_dirty_pages,
-              GC_grungy_pages, sizeof(GC_dirty_pages));
-      BZERO((/* no volatile */ void *)(word)GC_dirty_pages,
-            sizeof(GC_dirty_pages));
+        BCOPY(CAST_AWAY_VOLATILE_PVOID(GC_dirty_pages), GC_grungy_pages,
+              sizeof(GC_dirty_pages));
+      BZERO(CAST_AWAY_VOLATILE_PVOID(GC_dirty_pages), sizeof(GC_dirty_pages));
 #     ifdef MPROTECT_VDB
         if (!GC_manual_vdb)
           GC_protect_heap();
@@ -4300,8 +4303,7 @@ GC_INNER GC_bool GC_dirty_init(void)
       }
 #   endif
 #   if defined(CHECK_SOFT_VDB) /* && MPROTECT_VDB */
-      BZERO((/* no volatile */ void *)(word)GC_dirty_pages,
-            sizeof(GC_dirty_pages));
+      BZERO(CAST_AWAY_VOLATILE_PVOID(GC_dirty_pages), sizeof(GC_dirty_pages));
       GC_protect_heap();
 #   endif
   }
@@ -5273,7 +5275,7 @@ GC_API int GC_CALL GC_get_pages_executable(void)
                                         struct callinfo info[NFRAMES])
           {
             GC_ASSERT(I_HOLD_LOCK());
-            info[0].ci_pc = (word)(&GC_save_callers_no_unlock);
+            info[0].ci_pc = (GC_return_addr_t)(&GC_save_callers_no_unlock);
             BZERO(&info[1], sizeof(void *) * (NFRAMES - 1));
           }
 #       endif
@@ -5292,7 +5294,7 @@ GC_API int GC_CALL GC_get_pages_executable(void)
         GC_STATIC_ASSERT(sizeof(struct callinfo) == sizeof(void *));
 #       ifdef REDIRECT_MALLOC
           if (GC_in_save_callers) {
-            info[0].ci_pc = (word)(&GC_save_callers);
+            info[0].ci_pc = (GC_return_addr_t)(&GC_save_callers);
             BZERO(&info[1], sizeof(void *) * (NFRAMES - 1));
             return;
           }
@@ -5360,11 +5362,11 @@ GC_API int GC_CALL GC_get_pages_executable(void)
             int i;
 #         endif
 
-          info[nframes].ci_pc = fp -> FR_SAVPC;
+          info[nframes].ci_pc = (GC_return_addr_t)(fp -> FR_SAVPC);
 #         if NARGS > 0
             for (i = 0; i < NARGS; i++) {
               info[nframes].ci_arg[i] =
-                GC_HIDE_NZ_POINTER((void *)(signed_word)(fp -> fr_arg[i]));
+                        GC_HIDE_NZ_POINTER((void *)(fp -> fr_arg[i]));
             }
 #         endif
         }
@@ -5434,9 +5436,9 @@ GC_API int GC_CALL GC_get_pages_executable(void)
           char buf[40];
           char *name;
 #         if defined(GC_HAVE_BUILTIN_BACKTRACE) \
-             && !defined(GC_BACKTRACE_SYMBOLS_BROKEN)
-            char **sym_name =
-              backtrace_symbols((void **)(&(info[i].ci_pc)), 1);
+             && !defined(GC_BACKTRACE_SYMBOLS_BROKEN) \
+             && defined(FUNCPTR_IS_DATAPTR)
+            char **sym_name = backtrace_symbols((void **)&info[i].ci_pc, 1);
             if (sym_name != NULL) {
               name = sym_name[0];
             } else
@@ -5526,7 +5528,7 @@ GC_API int GC_CALL GC_get_pages_executable(void)
                   if (strncmp(result_buf, "main",
                               nl != NULL
                                 ? (size_t)(ADDR(nl) /* a cppcheck workaround */
-                                           - COVERT_DATAFLOW(result_buf))
+                                           - COVERT_DATAFLOW(ADDR(result_buf)))
                                 : result_len) == 0) {
                     stop = TRUE;
                   }
@@ -5547,7 +5549,8 @@ GC_API int GC_CALL GC_get_pages_executable(void)
 #         endif /* LINUX */
           GC_err_printf("\t\t%s\n", name);
 #         if defined(GC_HAVE_BUILTIN_BACKTRACE) \
-             && !defined(GC_BACKTRACE_SYMBOLS_BROKEN)
+             && !defined(GC_BACKTRACE_SYMBOLS_BROKEN) \
+             && defined(FUNCPTR_IS_DATAPTR)
             if (sym_name != NULL)
               free(sym_name);   /* May call GC_[debug_]free; that's OK  */
 #         endif

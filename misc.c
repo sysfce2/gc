@@ -269,7 +269,8 @@ STATIC void GC_init_size_map(void)
   {
 #   ifndef STACK_NOT_SCANNED
       word volatile dummy[SMALL_CLEAR_SIZE];
-      BZERO((/* no volatile */ word *)((word)dummy), sizeof(dummy));
+
+      BZERO(CAST_AWAY_VOLATILE_PVOID(dummy), sizeof(dummy));
 #   endif
     return arg;
   }
@@ -310,7 +311,7 @@ STATIC void GC_init_size_map(void)
 #     define CLEAR_SIZE 213 /* granularity */
       volatile word dummy[CLEAR_SIZE];
 
-      BZERO((/* no volatile */ word *)((word)dummy), sizeof(dummy));
+      BZERO(CAST_AWAY_VOLATILE_PVOID(dummy), sizeof(dummy));
       if (HOTTER_THAN((/* no volatile */ ptr_t)limit, GC_approx_sp())) {
         (void)GC_clear_stack_inner(arg, limit);
       }
@@ -319,7 +320,7 @@ STATIC void GC_init_size_map(void)
 #     if defined(CPPCHECK)
         GC_noop1(dummy[0]);
 #     else
-        GC_noop1(COVERT_DATAFLOW(dummy));
+        GC_noop1(COVERT_DATAFLOW(ADDR(dummy)));
 #     endif
       return arg;
     }
@@ -380,7 +381,7 @@ STATIC void GC_init_size_map(void)
                         /* implementations of GC_clear_stack_inner.     */
         return GC_clear_stack_inner(arg, limit);
       }
-      BZERO((/* no volatile */ void *)dummy, SMALL_CLEAR_SIZE * sizeof(word));
+      BZERO(CAST_AWAY_VOLATILE_PVOID(dummy), sizeof(dummy));
 #   else
       if (GC_gc_no != GC_stack_last_cleared) {
         /* Start things over, so we clear the entire stack again.   */
@@ -475,7 +476,7 @@ GC_API size_t GC_CALL GC_size(const void * p)
     /* Accept NULL for compatibility with malloc_usable_size(). */
     if (EXPECT(NULL == p, FALSE)) return 0;
 
-    hhdr = HDR((/* no const */ void *)(word)p);
+    hhdr = HDR(p);
     return (size_t)(hhdr -> hb_sz);
 }
 
@@ -1176,10 +1177,10 @@ GC_API void GC_CALL GC_init(void)
 #       ifndef ENABLE_TRACE
           WARN("Tracing not enabled: Ignoring GC_TRACE value\n", 0);
 #       else
-          ptr_t p = (ptr_t)STRTOULL(str, NULL, 16);
+          ptr_t p = MAKE_CPTR(STRTOULL(str, NULL, 16));
 
           if (ADDR(p) < 0x1000)
-              WARN("Unlikely trace address: %p\n", (void *)p);
+              WARN("Unlikely trace address: %p\n", p);
           GC_trace_ptr = p;
 #       endif
       }
@@ -1293,8 +1294,8 @@ GC_API void GC_CALL GC_init(void)
 #   if ALIGNMENT > GC_DS_TAGS
       /* Adjust normal object descriptor for extra allocation.  */
       if (EXTRA_BYTES != 0)
-        GC_obj_kinds[NORMAL].ok_descriptor =
-                        ((~(word)ALIGNMENT) + 1) | GC_DS_LENGTH;
+        GC_obj_kinds[NORMAL].ok_descriptor
+                                = ((~(word)ALIGNMENT) + 1) | GC_DS_LENGTH;
 #   endif
     GC_exclude_static_roots_inner(beginGC_arrays, endGC_arrays);
     GC_exclude_static_roots_inner(beginGC_obj_kinds, endGC_obj_kinds);
@@ -1330,11 +1331,12 @@ GC_API void GC_CALL GC_init(void)
       }
 #   endif
 #   if !defined(CPPCHECK)
-      GC_STATIC_ASSERT(sizeof(ptr_t) == sizeof(word));
+      GC_STATIC_ASSERT(sizeof(ptrdiff_t) == sizeof(word));
       GC_STATIC_ASSERT(sizeof(signed_word) == sizeof(word));
+      GC_STATIC_ASSERT(sizeof(ptr_t) == sizeof(GC_uintptr_t));
       GC_STATIC_ASSERT(sizeof(GC_oom_func) == sizeof(GC_funcptr_uint));
-#     ifdef FUNCPTR_IS_WORD
-        GC_STATIC_ASSERT(sizeof(word) == sizeof(GC_funcptr_uint));
+#     ifdef FUNCPTR_IS_DATAPTR
+        GC_STATIC_ASSERT(sizeof(ptr_t) == sizeof(GC_funcptr_uint));
 #     endif
 #     if !defined(_AUX_SOURCE) || defined(__GNUC__)
         GC_STATIC_ASSERT((word)(-1) > (word)0);
@@ -1996,21 +1998,16 @@ void GC_err_puts(const char *s)
     (void)WRITE(GC_stderr, s, strlen(s)); /* ignore errors */
 }
 
-STATIC void GC_CALLBACK GC_default_warn_proc(char *msg, GC_word arg)
+STATIC void GC_CALLBACK GC_default_warn_proc(const char *msg, GC_uintptr_t arg)
 {
     /* TODO: Add assertion on arg comply with msg (format).     */
-#   if defined(CPPCHECK)
-      /* Workaround "parameter can be declared as pointer to const" */
-      /* cppcheck warning.                                          */
-      NOOP1_PTR(msg);
-#   endif
     GC_warn_printf(msg, arg);
 }
 
 GC_INNER GC_warn_proc GC_current_warn_proc = GC_default_warn_proc;
 
 /* This is recommended for production code (release). */
-GC_API void GC_CALLBACK GC_ignore_warn_proc(char *msg, GC_word arg)
+GC_API void GC_CALLBACK GC_ignore_warn_proc(const char *msg, GC_uintptr_t arg)
 {
     if (GC_print_stats) {
       /* Don't ignore warnings if stats printing is on. */
@@ -2156,7 +2153,7 @@ GC_API void ** GC_CALL GC_new_free_list_inner(void)
 
     GC_ASSERT(I_HOLD_LOCK());
     result = GC_INTERNAL_MALLOC((MAXOBJGRANULES+1) * sizeof(ptr_t), PTRFREE);
-    if (NULL == result) ABORT("Failed to allocate freelist for new kind");
+    if (NULL == result) ABORT("Failed to allocate free list for new kind");
     BZERO(result, (MAXOBJGRANULES+1)*sizeof(ptr_t));
     return (void **)result;
 }
@@ -2302,7 +2299,7 @@ GC_API void * GC_CALL GC_call_with_stack_base(GC_stack_base_func fn, void *arg)
     result = (*(GC_stack_base_func volatile *)&fn)(&base, arg);
     /* Strongly discourage the compiler from treating the above */
     /* as a tail call.                                          */
-    GC_noop1(COVERT_DATAFLOW(&base));
+    GC_noop1(COVERT_DATAFLOW(ADDR(&base)));
     return result;
 }
 
@@ -2326,13 +2323,13 @@ GC_API void * GC_CALL GC_call_with_gc_active(GC_fn_type fn, void *client_data)
     /* GC_get_main_stack_base() is unimplemented or broken for  */
     /* the platform).                                           */
     if (HOTTER_THAN(GC_stackbottom, (ptr_t)(&stacksect)))
-      GC_stackbottom = (ptr_t)COVERT_DATAFLOW(&stacksect);
+      GC_stackbottom = COVERT_DATAFLOW_P(&stacksect);
 
     if (GC_blocked_sp == NULL) {
       /* We are not inside GC_do_blocking() - do nothing more.  */
       client_data = (*(GC_fn_type volatile *)&fn)(client_data);
       /* Prevent treating the above as a tail call.     */
-      GC_noop1(COVERT_DATAFLOW(&stacksect));
+      GC_noop1(COVERT_DATAFLOW(ADDR(&stacksect)));
       return client_data; /* result */
     }
 
@@ -2354,8 +2351,8 @@ GC_API void * GC_CALL GC_call_with_gc_active(GC_fn_type fn, void *client_data)
     GC_ASSERT(GC_traced_stack_sect == &stacksect);
 
 #   if defined(CPPCHECK)
-      NOOP1_PTR(GC_traced_stack_sect);
-      NOOP1_PTR(GC_blocked_sp);
+      GC_noop1_ptr(GC_traced_stack_sect);
+      GC_noop1_ptr(GC_blocked_sp);
 #   endif
     /* Restore original "stack section".        */
     GC_traced_stack_sect = stacksect.prev;
@@ -2392,7 +2389,7 @@ STATIC void GC_do_blocking_inner(ptr_t data, void *context)
         GC_ASSERT(GC_blocked_sp == (ptr_t)(&d));
 #   endif
 #   if defined(CPPCHECK)
-      NOOP1_PTR(GC_blocked_sp);
+      GC_noop1_ptr(GC_blocked_sp);
 #   endif
     GC_blocked_sp = NULL;
 }
@@ -2476,10 +2473,14 @@ GC_API void * GC_CALL GC_do_blocking(GC_fn_type fn, void * client_data)
   }
 #endif /* !NO_DEBUGGING */
 
-static void GC_CALLBACK block_add_size(struct hblk *h, GC_word pbytes)
+static void GC_CALLBACK block_add_size(struct hblk *h, void *pbytes)
 {
   const hdr *hhdr = HDR(h);
+
   *(word *)pbytes += (hhdr -> hb_sz + HBLKSIZE-1) & ~(word)(HBLKSIZE-1);
+# if defined(CPPCHECK)
+    GC_noop1_ptr(h);
+# endif
 }
 
 GC_API size_t GC_CALL GC_get_memory_use(void)
@@ -2487,7 +2488,7 @@ GC_API size_t GC_CALL GC_get_memory_use(void)
   word bytes = 0;
 
   READER_LOCK();
-  GC_apply_to_all_blocks(block_add_size, (word)(&bytes));
+  GC_apply_to_all_blocks(block_add_size, &bytes);
   READER_UNLOCK();
   return (size_t)bytes;
 }

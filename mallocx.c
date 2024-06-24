@@ -43,7 +43,7 @@ void ** const GC_uobjfreelist_ptr = GC_uobjfreelist;
 
 GC_API int GC_CALL GC_get_kind_and_size(const void * p, size_t * psize)
 {
-    const hdr *hhdr = HDR((/* no const */ void *)(word)p);
+    const hdr *hhdr = HDR(p);
 
     if (psize != NULL) {
         *psize = (size_t)(hhdr -> hb_sz);
@@ -74,15 +74,16 @@ GC_API GC_ATTR_MALLOC void * GC_CALL GC_generic_or_special_malloc(size_t lb,
 /* Shrinking of large blocks is not implemented well.                 */
 GC_API void * GC_CALL GC_realloc(void * p, size_t lb)
 {
-    struct hblk * h;
     hdr * hhdr;
     void * result;
 #   if defined(_FORTIFY_SOURCE) && defined(__GNUC__) && !defined(__clang__)
-      volatile  /* Use cleared_p instead of p as a workaround to avoid  */
-                /* passing alloc_size(lb) attribute associated with p   */
-                /* to memset (including memset call inside GC_free).    */
+      /* Use cleared_p instead of p as a workaround to avoid        */
+      /* passing alloc_size(lb) attribute associated with p to      */
+      /* memset (including a memset call inside GC_free).           */
+      volatile GC_uintptr_t cleared_p = (GC_uintptr_t)p;
+#   else
+#     define cleared_p p
 #   endif
-      word cleared_p = (word)p;
     size_t sz;      /* Current size in bytes    */
     size_t orig_sz; /* Original sz in bytes     */
     int obj_kind;
@@ -94,8 +95,7 @@ GC_API void * GC_CALL GC_realloc(void * p, size_t lb)
 #     endif
       return NULL;
     }
-    h = HBLKPTR(p);
-    hhdr = HDR(h);
+    hhdr = HDR(HBLKPTR(p));
     sz = (size_t)hhdr->hb_sz;
     obj_kind = hhdr -> hb_obj_kind;
     orig_sz = sz;
@@ -173,6 +173,7 @@ GC_API void * GC_CALL GC_realloc(void * p, size_t lb)
 #     endif
     }
     return result;
+#   undef cleared_p
 }
 
 # if defined(REDIRECT_MALLOC) && !defined(REDIRECT_REALLOC)

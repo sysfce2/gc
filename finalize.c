@@ -84,7 +84,7 @@ GC_API void GC_CALL GC_push_finalizer_structures(void)
 /* Threshold of log_size to initiate full collection before growing     */
 /* a hash table.                                                        */
 #ifndef GC_ON_GROW_LOG_SIZE_MIN
-# define GC_ON_GROW_LOG_SIZE_MIN CPP_LOG_HBLKSIZE
+# define GC_ON_GROW_LOG_SIZE_MIN LOG_HBLKSIZE
 #endif
 
 /* Double the size of a hash table. *log_size_ptr is the log of its     */
@@ -107,7 +107,7 @@ STATIC void GC_grow_table(struct hash_chain_entry ***table,
     /* be deleted by enforcing a collection.  Ignored for small tables. */
     /* In incremental mode we skip this optimization, as we want to     */
     /* avoid triggering a full GC whenever possible.                    */
-    if (log_old_size >= GC_ON_GROW_LOG_SIZE_MIN && !GC_incremental) {
+    if (log_old_size >= (unsigned)GC_ON_GROW_LOG_SIZE_MIN && !GC_incremental) {
       IF_CANCEL(int cancel_state;)
 
       DISABLE_CANCEL(cancel_state);
@@ -168,7 +168,7 @@ STATIC int GC_register_disappearing_link_inner(
     GC_ASSERT(GC_is_initialized);
     if (EXPECT(GC_find_leak, FALSE)) return GC_UNIMPLEMENTED;
 #   ifdef GC_ASSERTIONS
-      GC_noop1(ADDR(*link)); /* check accessibility */
+      GC_noop1_ptr(*link); /* check accessibility */
 #   endif
     LOCK();
     GC_ASSERT(obj != NULL && GC_base_C(obj) == obj);
@@ -533,7 +533,7 @@ GC_API GC_await_finalize_proc GC_CALL GC_get_await_finalize_proc(void)
     word curr_hidden_link, new_hidden_link;
 
 #   ifdef GC_ASSERTIONS
-      GC_noop1(ADDR(*new_link));
+      GC_noop1_ptr(*new_link);
 #   endif
     GC_ASSERT(I_HOLD_LOCK());
     if (EXPECT(NULL == dl_hashtbl -> head, FALSE)) return GC_NOT_FOUND;
@@ -670,7 +670,7 @@ STATIC void GC_unreachable_finalize_mark_proc(ptr_t p)
 {
     /* A dummy comparison to ensure the compiler not to optimize two    */
     /* identical functions into a single one (thus, to ensure a unique  */
-    /* address of each).  Alternatively, GC_noop1(p) could be used.     */
+    /* address of each).  Alternatively, GC_noop1_ptr(p) could be used. */
     if (EXPECT(NULL == p, FALSE)) return;
 
     GC_normal_finalize_mark_proc(p);

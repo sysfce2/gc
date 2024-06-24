@@ -68,7 +68,7 @@ typedef struct back_edges_struct {
   struct back_edges_struct *cont;
                 /* Pointer to continuation structure; we use only the   */
                 /* edges field in the continuation.                     */
-                /* also used as free list link.                         */
+                /* also used as a free-list link.                       */
 } back_edges;
 
 /* Allocate a new back edge structure.  Should be more sophisticated    */
@@ -152,7 +152,7 @@ static void push_in_progress(ptr_t p)
                                 n_in_progress * sizeof(ptr_t));
 #   elif defined(LINT2)
       /* TODO: implement GWW-aware recycling as in alloc_mark_stack */
-      NOOP1_PTR(in_progress_space);
+      GC_noop1_ptr(in_progress_space);
 #   endif
     in_progress_space = new_in_progress_space;
   }
@@ -195,7 +195,7 @@ static void ensure_struct(ptr_t p)
 
     be -> flags = 0;
 #   if defined(CPPCHECK)
-      NOOP1_PTR(&old_back_ptr);
+      GC_noop1_ptr(&old_back_ptr);
       /* Workaround a false positive that old_back_ptr cannot be null.  */
 #   endif
     if (NULL == old_back_ptr) {
@@ -222,12 +222,12 @@ static void add_edge(ptr_t p, ptr_t q)
     GC_ASSERT(p == GC_base(p) && q == GC_base(q));
     GC_ASSERT(I_HOLD_LOCK());
     if (!GC_HAS_DEBUG_INFO(q) || !GC_HAS_DEBUG_INFO(p)) {
-      /* This is really a misinterpreted free list link, since we saw   */
+      /* This is really a misinterpreted free-list link, since we saw   */
       /* a pointer to a free list.  Don't overwrite it!                 */
       return;
     }
 #   if defined(CPPCHECK)
-      NOOP1_PTR(&pred);
+      GC_noop1_ptr(&pred);
 #   endif
     if (NULL == pred) {
       static unsigned random_number = 13;
@@ -252,8 +252,8 @@ static void add_edge(ptr_t p, ptr_t q)
 
       if ((ADDR(pred) & FLAG_MANY) != 0) {
         n_edges = e -> n_edges;
-      } else if ((ADDR(COVERT_DATAFLOW(pred)) & 1) == 0) {
-        /* A misinterpreted freelist link.      */
+      } else if ((COVERT_DATAFLOW(ADDR(pred)) & 1) == 0) {
+        /* A misinterpreted free-list link.     */
         n_edges = 1;
         local = -1;
       } else {
@@ -292,7 +292,7 @@ static void add_edge(ptr_t p, ptr_t q)
 
 typedef void (*per_object_func)(ptr_t p, size_t n_bytes, word gc_descr);
 
-static GC_CALLBACK void per_object_helper(struct hblk *h, GC_word fn_ptr)
+static GC_CALLBACK void per_object_helper(struct hblk *h, void *fn_ptr)
 {
   const hdr *hhdr = HDR(h);
   size_t sz = (size_t)(hhdr -> hb_sz);
@@ -308,7 +308,7 @@ static GC_CALLBACK void per_object_helper(struct hblk *h, GC_word fn_ptr)
 
 GC_INLINE void GC_apply_to_each_object(per_object_func fn)
 {
-  GC_apply_to_all_blocks(per_object_helper, (word)(&fn));
+  GC_apply_to_all_blocks(per_object_helper, &fn);
 }
 
 static void reset_back_edge(ptr_t p, size_t n_bytes, word gc_descr)
@@ -316,7 +316,7 @@ static void reset_back_edge(ptr_t p, size_t n_bytes, word gc_descr)
   UNUSED_ARG(n_bytes);
   UNUSED_ARG(gc_descr);
   GC_ASSERT(I_HOLD_LOCK());
-  /* Skip any free list links, or dropped blocks */
+  /* Skip any free-list links, or dropped blocks.   */
   if (GC_HAS_DEBUG_INFO(p)) {
     ptr_t old_back_ptr = GET_OH_BG_PTR(p);
 
@@ -392,7 +392,7 @@ static word backwards_height(ptr_t p)
 
   GC_ASSERT(I_HOLD_LOCK());
 # if defined(CPPCHECK)
-    NOOP1_PTR(&pred);
+    GC_noop1_ptr(&pred);
 # endif
   if (NULL == pred)
     return 1;
@@ -422,7 +422,7 @@ static word backwards_height(ptr_t p)
       if ((ADDR(pred) & FLAG_MANY) != 0) {
         n_edges = e -> n_edges;
       } else if ((ADDR(pred) & 1) == 0) {
-        /* A misinterpreted freelist link.      */
+        /* A misinterpreted free-list link.     */
         n_edges = 1;
         local = -1;
       } else {
@@ -483,7 +483,7 @@ static void update_max_height(ptr_t p, size_t n_bytes, word gc_descr)
     /* to p, but it can't have decreased.                               */
     back_ptr = GET_OH_BG_PTR(p);
 #   if defined(CPPCHECK)
-      NOOP1_PTR(&back_ptr);
+      GC_noop1_ptr(&back_ptr);
 #   endif
     if (back_ptr != NULL && (ADDR(back_ptr) & FLAG_MANY) != 0) {
       be = (back_edges *)((word)back_ptr & ~(word)FLAG_MANY);
@@ -501,7 +501,7 @@ static void update_max_height(ptr_t p, size_t n_bytes, word gc_descr)
       if ((ADDR(pred) & FLAG_MANY) != 0) {
         n_edges = e -> n_edges;
       } else if (pred != NULL && (ADDR(pred) & 1) == 0) {
-        /* A misinterpreted freelist link.      */
+        /* A misinterpreted free-list link.     */
         n_edges = 1;
         local = -1;
       } else {

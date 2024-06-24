@@ -174,7 +174,7 @@ STATIC volatile LONG GC_max_thread_index = 0;
 /* GC_win32_dll_threads is set.  Always called from the thread being    */
 /* added.  If GC_win32_dll_threads is not set, we already hold the      */
 /* allocator lock except possibly during single-threaded startup code.  */
-/* Does not initialize thread local free lists.                         */
+/* Does not initialize thread-local free lists.                         */
 GC_INNER GC_thread GC_register_my_thread_inner(const struct GC_stack_base *sb,
                                                thread_id_t self_id)
 {
@@ -580,9 +580,9 @@ GC_INNER void GC_start_world(void)
 #       ifdef DEBUG_THREADS
           GC_log_printf("Resuming 0x%x\n", (int)p->id);
 #       endif
-        GC_ASSERT(p -> id != self_id
-            && *(/* no volatile */ ptr_t *)
-                        (word)(&(p -> crtn -> stack_end)) != NULL);
+        GC_ASSERT(p -> id != self_id);
+        GC_ASSERT(*(ptr_t *)CAST_AWAY_VOLATILE_PVOID(
+                                &(p -> crtn -> stack_end)) != NULL);
         if (ResumeThread(THREAD_HANDLE(p)) == (DWORD)-1)
           ABORT("ResumeThread failed");
         p -> flags &= (unsigned char)~IS_SUSPENDED;
@@ -740,7 +740,7 @@ static ptr_t copy_ptr_regs(word *regs, const CONTEXT *pcontext) {
       PUSH4(IntT10,IntT11,IntT12,IntAt);
       sp = (ptr_t)context.IntSp;
 #   elif defined(CPPCHECK)
-      NOOP1_PTR(regs);
+      GC_noop1_ptr(regs);
       sp = (ptr_t)(word)cnt; /* to workaround "cnt not used" false positive */
 #   else
 #     error Architecture is not supported
@@ -1048,8 +1048,7 @@ GC_INNER void GC_get_next_stack(ptr_t start, ptr_t limit,
 
       if (ADDR_LT(start, stack_end) && ADDR_LT(stack_end, current_min)) {
         /* Update address of last_stack_min. */
-        plast_stack_min = (ptr_t * /* no volatile */)(word)(
-                            &(dll_thread_table[i].crtn -> last_stack_min));
+        plast_stack_min = &(dll_thread_table[i].crtn -> last_stack_min);
         current_min = stack_end;
 #       ifdef CPPCHECK
           /* To avoid a warning that thread is always null.     */
@@ -1402,7 +1401,7 @@ STATIC void *GC_CALLBACK GC_win32_start_inner(struct GC_stack_base *sb,
                     (long)GetCurrentThreadId());
 #   endif
 #   if defined(CPPCHECK)
-      NOOP1_PTR(sb);
+      GC_noop1_ptr(sb);
 #   endif
     return ret;
 }
@@ -1650,11 +1649,11 @@ GC_INNER void GC_thr_init(void)
 # if (!defined(HAVE_PTHREAD_SETNAME_NP_WITH_TID) && !defined(MSWINCE) \
       && defined(PARALLEL_MARK)) || defined(WOW64_THREAD_CONTEXT_WORKAROUND)
     HMODULE hK32;
-#   ifdef MSWINRT_FLAVOR
+#   if defined(MSWINRT_FLAVOR) && defined(FUNCPTR_IS_DATAPTR)
       MEMORY_BASIC_INFORMATION memInfo;
 
-      if (VirtualQuery((void*)(word)GetProcAddress, &memInfo, sizeof(memInfo))
-          != sizeof(memInfo))
+      if (VirtualQuery(CAST_THRU_UINTPTR(void*, GetProcAddress),
+                       &memInfo, sizeof(memInfo)) != sizeof(memInfo))
         ABORT("Weird VirtualQuery result");
       hK32 = (HMODULE)memInfo.AllocationBase;
 #   else
@@ -1820,7 +1819,7 @@ GC_INNER void GC_thr_init(void)
                         GC_get_stack_base(&sb);
             GC_ASSERT(sb_result == GC_SUCCESS);
             GC_register_my_thread_inner(&sb, self_id);
-        } /* o.w. we already did it during GC_thr_init, called by GC_init */
+        } /* else we already did it during GC_thr_init, called by GC_init */
         break;
 
        case DLL_THREAD_DETACH:

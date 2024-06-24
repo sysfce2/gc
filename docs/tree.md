@@ -148,7 +148,7 @@ contributed originally by Dave Barrett.
        ---      +----------------------+
         ^       |                      |
         |       |                      | * if hdr is free, hb_sz is the size
-    MARK_BITS_SZ| char/word hb_marks[] | of a heap chunk (struct hblk) of at
+    HB_MARKS_SZ | char/word hb_marks[] | of a heap chunk (struct hblk) of at
         |       |                      | least MININCR*HBLKSIZE bytes (below);
         v       |                      | otherwise, size of each object in chunk.
        ---      +----------------------+
@@ -162,21 +162,21 @@ collected.
 
                  (struct hblk)
       ---    +----------------------+ < HBLKSIZE  ---
-       ^     +-----hb_body----------+ (and         ^         ---   ---
-       |     |                      |  CPP_WORDSZ- |          ^     ^
-       |     |                      |  aligned)    |          |     |
-       |     |                      |              |        hb_sz   |
-       |     |      Object 0        |              |          |     |
-       |     |                      |            i |(word-    v     |
-       |     + - - - - - - - - - - -+ ---   (bytes)|aligned) ---    |
-       |     |                      |  ^           |          ^     |
-       |     |                      |  j (words)   |          |     |
-     n *     |      Object 1        |  v           v        hb_sz HBLKSIZE/BYTES_PER_WORD
-    HBLKSIZE |                      |---------------          |   (words)
-    (bytes)  |                      |                         v     |
-       |     + - - - - - - - - - - -+                        ---    |
-       |     |                      | !ALL_INTERIOR_POINTERS  ^     |
-       |     |                      | sets j only for       hb_sz   |
-       |     |      Object N        | valid object offsets.   |     |
-       v     |                      | All objects CPP_WORDSZ- v     v
-      ---    +----------------------+ aligned.               ---   ---
+       ^     +-----hb_body----------+ (and         ^         ---
+       |     |                      |  CPP_WORDSZ- |          ^
+       |     |                      |  aligned)    |          |
+       |     |                      |              |        hb_sz
+       |     |      Object 0        |              |          |
+       |     |                      |            i |(word-    v
+       |     + - - - - - - - - - - -+ ---   (bytes)|aligned) ---
+       |     |                      |  ^           |          ^
+       |     |                      |  j (words)   |          |
+     n *     |      Object 1        |  v           v        hb_sz
+    HBLKSIZE |                      |---------------          |
+    (bytes)  |                      |                         v
+       |     + - - - - - - - - - - -+                        ---
+       |     |                      | !ALL_INTERIOR_POINTERS  ^
+       |     |                      | sets j only for       hb_sz
+       |     |      Object N        | valid object offsets.   |
+       v     |                      | All objects CPP_WORDSZ- v
+      ---    +----------------------+ aligned.               ---

@@ -311,8 +311,8 @@ struct SEXPR {
 
 typedef struct SEXPR * sexpr;
 
-# define INT_TO_SEXPR(x) ((sexpr)(GC_word)(x))
-# define SEXPR_TO_INT(x) ((int)(GC_word)(x))
+# define INT_TO_SEXPR(v) ((sexpr)(GC_uintptr_t)(unsigned)(v))
+# define SEXPR_TO_INT(p) ((int)(GC_word)(p))
 
 # undef nil
 # define nil (INT_TO_SEXPR(0))
@@ -356,33 +356,35 @@ static sexpr cons(sexpr x, sexpr y)
 #include "gc/gc_mark.h"
 
 #ifdef GC_GCJ_SUPPORT
+# include "gc/gc_gcj.h"
 
-#include "gc/gc_gcj.h"
+  /* The following struct emulates the vtable in gcj.       */
+  /* This assumes the default value of MARK_DESCR_OFFSET.   */
+  struct fake_vtable {
+    void *dummy; /* a class pointer in real GCJ */
+    GC_word descr;
+  };
 
-/* The following struct emulates the vtable in gcj.     */
-/* This assumes the default value of MARK_DESCR_OFFSET. */
-struct fake_vtable {
-  void * dummy;         /* class pointer in real gcj.   */
-  GC_word descr;
-};
+  const struct fake_vtable gcj_class_struct1 = { /* length-based descriptor */
+    NULL,
+    (sizeof(struct SEXPR) + sizeof(struct fake_vtable *)) | GC_DS_LENGTH
+  };
 
-struct fake_vtable gcj_class_struct1 = { 0, sizeof(struct SEXPR)
-                                            + sizeof(struct fake_vtable *) };
-                        /* length based descriptor.     */
-struct fake_vtable gcj_class_struct2 =
-                        { 0, ((GC_word)3 << (CPP_WORDSZ - 3)) | GC_DS_BITMAP};
-                        /* Bitmap based descriptor.     */
+  const struct fake_vtable gcj_class_struct2 = { /* bitmap-based descriptor */
+    NULL,
+    ((GC_word)3 << (CPP_WORDSZ - 3)) | GC_DS_BITMAP
+  };
 
-static struct GC_ms_entry *GC_CALLBACK fake_gcj_mark_proc(GC_word *addr,
+  static struct GC_ms_entry *GC_CALLBACK fake_gcj_mark_proc(GC_word *addr,
                                         struct GC_ms_entry *mark_stack_top,
                                         struct GC_ms_entry *mark_stack_limit,
                                         GC_word env)
-{
+  {
     sexpr x;
 
     if (1 == env) {
-        /* Object allocated with debug allocator.       */
-        addr = (GC_word *)GC_USR_PTR_FROM_BASE(addr);
+      /* Object allocated with debug allocator. */
+      addr = (GC_word *)GC_USR_PTR_FROM_BASE(addr);
     }
     x = (sexpr)(addr + 1); /* Skip the vtable pointer. */
     mark_stack_top = GC_MARK_AND_PUSH(x -> sexpr_cdr,
@@ -390,8 +392,7 @@ static struct GC_ms_entry *GC_CALLBACK fake_gcj_mark_proc(GC_word *addr,
                                       (void **)&(x -> sexpr_cdr));
     return GC_MARK_AND_PUSH(x -> sexpr_car, mark_stack_top, mark_stack_limit,
                             (void **)&(x -> sexpr_car));
-}
-
+  }
 #endif /* GC_GCJ_SUPPORT */
 
 static sexpr small_cons(sexpr x, sexpr y)
@@ -435,8 +436,8 @@ static sexpr small_cons_uncollectable(sexpr x, sexpr y)
   {
     sexpr result;
     size_t cnt = (size_t)AO_fetch_and_add1(&extra_count);
-    void *d = (cnt & 1) != 0 ? &gcj_class_struct1 : &gcj_class_struct2;
-    size_t lb = sizeof(struct SEXPR) + sizeof(struct fake_vtable*);
+    const void *d = (cnt & 1) != 0 ? &gcj_class_struct1 : &gcj_class_struct2;
+    size_t lb = sizeof(struct SEXPR) + sizeof(struct fake_vtable *);
     void *r = (cnt & 2) != 0 ? GC_GCJ_MALLOC_IGNORE_OFF_PAGE(lb
                                         + (cnt <= HBLKSIZE / 2 ? cnt : 0), d)
                              : GC_GCJ_MALLOC(lb, d);
@@ -464,7 +465,7 @@ static sexpr reverse1(sexpr x, sexpr y)
 static sexpr reverse(sexpr x)
 {
 #   ifdef TEST_WITH_SYSTEM_MALLOC
-      GC_noop1(GC_HIDE_NZ_POINTER(checkOOM(malloc(100000))));
+      GC_noop1((GC_word)GC_HIDE_NZ_POINTER(checkOOM(malloc(100000))));
 #   endif
     return reverse1(x, nil);
 }
@@ -853,11 +854,12 @@ static void *GC_CALLBACK reverse_test_inner(void *data)
 
     if (data == 0) {
       /* This stack frame is not guaranteed to be scanned. */
-      return GC_call_with_gc_active(reverse_test_inner, (void*)(GC_word)1);
+      return GC_call_with_gc_active(reverse_test_inner,
+                                    (void *)(GC_uintptr_t)1);
     }
 
 # if defined(CPPCHECK)
-    NOOP1_PTR(data);
+    GC_noop1_ptr(data);
 # endif
 # ifndef BIG
 #   if defined(MACOS) \
@@ -984,8 +986,8 @@ static void *GC_CALLBACK reverse_test_inner(void *data)
 #   ifndef THREADS
       a_set(NULL);
 #   endif
-    *(sexpr volatile *)(GC_word)&b = 0;
-    *(sexpr volatile *)(GC_word)&c = 0;
+    *CAST_THRU_UINTPTR(volatile sexpr *, &b) = 0;
+    *CAST_THRU_UINTPTR(volatile sexpr *, &c) = 0;
     return 0;
 }
 
@@ -1018,7 +1020,7 @@ int dropped_something = 0;
     tn *t = (tn *)obj;
 
     FINALIZER_LOCK();
-    if ((int)(GC_word)client_data != t -> level) {
+    if ((int)(GC_uintptr_t)client_data != t -> level) {
       GC_printf("Wrong finalization data - collector is broken\n");
       FAIL;
     }
@@ -1101,7 +1103,7 @@ static tn * mktree(int n)
 
 #   ifndef GC_NO_FINALIZATION
       if (!GC_get_find_leak()) {
-        GC_REGISTER_FINALIZER(result, finalizer, (void *)(GC_word)n,
+        GC_REGISTER_FINALIZER(result, finalizer, (void *)(GC_uintptr_t)n,
                               (GC_finalization_proc *)0, (void **)0);
         if (my_index >= MAX_FINALIZED) {
             GC_printf("live_indicators overflowed\n");
@@ -1451,7 +1453,7 @@ static void typed_test(void)
         newP = (GC_word *)old[1];
     }
     GC_gcollect();
-    NOOP1_PTR(x);
+    GC_noop1_ptr(x);
 }
 #endif /* !NO_TYPED_TEST */
 
@@ -1667,7 +1669,7 @@ static void run_one_test(void)
             GC_printf("Out of memory in GC_posix_memalign\n");
             exit(69);
           }
-          NOOP1_PTR(p);
+          GC_noop1_ptr(p);
           AO_fetch_and_add1(&collectable_count);
       }
 #     ifndef GC_NO_VALLOC
@@ -1714,7 +1716,7 @@ static void run_one_test(void)
       FAIL;
     }
 #   if defined(CPPCHECK)
-      NOOP1_PTR(x);
+      GC_noop1_ptr(x);
 #   endif
 #   ifdef GC_REQUIRE_WCSDUP
       {
@@ -1983,8 +1985,8 @@ static void test_long_mult(void)
 
   LONG_MULT(hp, lp, (unsigned32)0x1234567UL, (unsigned32)0xfedcba98UL);
 # if defined(CPPCHECK)
-    NOOP1_PTR(&hp);
-    NOOP1_PTR(&lp);
+    GC_noop1_ptr(&hp);
+    GC_noop1_ptr(&lp);
 # endif
   if (hp != (unsigned32)0x121fa00UL || lp != (unsigned32)0x23e20b28UL) {
     GC_printf("LONG_MULT gives wrong result\n");
@@ -2222,12 +2224,9 @@ void SetMinimumStack(long minSize)
 #define cMinStackSpace (512L * 1024L)
 #endif
 
-static void GC_CALLBACK warn_proc(char *msg, GC_word p)
+static void GC_CALLBACK warn_proc(const char *msg, GC_uintptr_t arg)
 {
-#   if defined(CPPCHECK)
-        NOOP1_PTR(msg);
-#   endif
-    GC_printf(msg, (unsigned long)p);
+    GC_printf(msg, arg);
     /*FAIL;*/
 }
 

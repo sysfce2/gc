@@ -58,6 +58,12 @@ typedef GC_SIGNEDWORD GC_signed_word;
 #undef GC_SIGNEDWORD
 #undef GC_UNSIGNEDWORD
 
+#if defined(_UINTPTR_T) || defined(_UINTPTR_T_DEFINED)
+  typedef uintptr_t GC_uintptr_t;
+#else
+  typedef GC_word GC_uintptr_t;
+#endif
+
 /* Is first pointer has a smaller address than the second one?  The     */
 /* arguments should be of the same pointer type, e.g. of char* type.    */
 /* Ancient compilers might treat a pointer as a signed value, thus we   */
@@ -1028,9 +1034,24 @@ GC_API GC_ATTR_MALLOC GC_ATTR_ALLOC_SIZE(1) void * GC_CALL
 GC_API GC_ATTR_MALLOC GC_ATTR_ALLOC_SIZE(1) void * GC_CALL
         GC_malloc_atomic_ignore_off_page(size_t /* lb */);
 
+#if (defined(GC_CAN_SAVE_CALL_STACKS) || defined(GC_ADD_CALLER)) \
+    && !defined(GC_RETURN_ADDR_T_DEFINED)
+  /* A type to hold a function return address (pointer).  Never used    */
+  /* for calling a function.                                            */
+# if defined(__GNUC__)
+    /* Define it as a data (object) pointer type to avoid the compiler  */
+    /* complain that ISO C forbids conversion between object and        */
+    /* function pointer types.                                          */
+    typedef void *GC_return_addr_t;
+# else
+    typedef void (*GC_return_addr_t)(void);
+# endif
+# define GC_RETURN_ADDR_T_DEFINED
+#endif /* GC_CAN_SAVE_CALL_STACKS || GC_ADD_CALLER */
+
 #ifdef GC_ADD_CALLER
 # define GC_EXTRAS GC_RETURN_ADDR, __FILE__, __LINE__
-# define GC_EXTRA_PARAMS GC_word ra, const char * s, int i
+# define GC_EXTRA_PARAMS GC_return_addr_t ra, const char * s, int i
 #else
 # define GC_EXTRAS __FILE__, __LINE__
 # define GC_EXTRA_PARAMS const char * s, int i
@@ -1091,15 +1112,21 @@ GC_API /* 'realloc' attr */ GC_ATTR_ALLOC_SIZE(2) void * GC_CALL
         GC_debug_realloc_replacement(void * /* object_addr */,
                                      size_t /* size_in_bytes */);
 
+#ifdef __cplusplus
+# define GC_CAST_AWAY_CONST_PVOID(p) \
+    reinterpret_cast</* no const */ void *>(reinterpret_cast<GC_uintptr_t>(p))
+#else
+# define GC_CAST_AWAY_CONST_PVOID(p) ((/* no const */ void *)(GC_uintptr_t)(p))
+#endif
+
 /* Convenient macros for disappearing links registration working both   */
 /* for debug and non-debug allocated objects, and accepting interior    */
 /* pointers to object.                                                  */
 #define GC_GENERAL_REGISTER_DISAPPEARING_LINK_SAFE(link, obj) \
       GC_general_register_disappearing_link(link, \
-                        GC_base((/* no const */ void *)(GC_word)(obj)))
+                                        GC_base(GC_CAST_AWAY_CONST_PVOID(obj)))
 #define GC_REGISTER_LONG_LINK_SAFE(link, obj) \
-      GC_register_long_link(link, \
-                            GC_base((/* no const */ void *)(GC_word)(obj)))
+      GC_register_long_link(link, GC_base(GC_CAST_AWAY_CONST_PVOID(obj)))
 
 #ifdef GC_DEBUG_REPLACEMENT
 # define GC_MALLOC(sz) GC_debug_malloc_replacement(sz)
@@ -1355,7 +1382,7 @@ GC_API int GC_CALL GC_general_register_disappearing_link(void ** /* link */,
         /* with) are ignored.  This was added after a long      */
         /* email discussion with John Ellis.                    */
         /* link must be non-NULL (and be properly aligned).     */
-        /* obj must be a pointer to the first word of an object */
+        /* obj must be a pointer to the beginning of an object  */
         /* allocated by GC_malloc or friends.   A link          */
         /* disappears when it is unregistered manually, or when */
         /* (*link) is cleared, or when the object containing    */
@@ -1501,7 +1528,9 @@ GC_API int GC_CALL GC_invoke_finalizers(void);
 /* associated external resource is still in use.                */
 /* The function is sometimes called keep_alive in other         */
 /* settings.                                                    */
-#if defined(__GNUC__) && !defined(__INTEL_COMPILER)
+#if defined(__GNUC__) && !defined(__INTEL_COMPILER) \
+    && !(defined(__APPLE__) && defined(__arm__) && defined(__TINYC__))
+        /* TCC (as of v0.9.28rc) does not support asm on macOS/arm. */
 # if defined(__e2k__)
 #   define GC_reachable_here(ptr) \
                 __asm__ __volatile__ (" " : : "r"(ptr) : "memory")
@@ -1511,30 +1540,35 @@ GC_API int GC_CALL GC_invoke_finalizers(void);
 # endif
 #elif defined(LINT2)
 # define GC_reachable_here(ptr) GC_noop1(~(GC_word)(ptr)^(~(GC_word)0))
-                /* The expression matches the one of COVERT_DATAFLOW(). */
+                /* The expression is similar to that of COVERT_DATAFLOW(). */
 #else
-# define GC_reachable_here(ptr) GC_noop1((GC_word)(ptr))
+# define GC_reachable_here(ptr) GC_noop1_ptr(GC_CAST_AWAY_CONST_PVOID(ptr))
 #endif
 
-/* Make the argument appear live to compiler.  Should be robust against */
-/* the whole program analysis.                                          */
+/* Make the argument of word type appear live to compiler.  This could  */
+/* be used to prevent certain compiler false positive (FP) warnings and */
+/* misoptimizations.  Should be robust against the whole program        */
+/* analysis.                                                            */
 GC_API void GC_CALL GC_noop1(GC_word);
+
+/* Same as GC_noop1() but for a pointer.        */
+GC_API void GC_CALL GC_noop1_ptr(volatile void *);
 
 /* GC_set_warn_proc can be used to redirect or filter warning messages. */
 /* p may not be a NULL pointer.  msg is printf format string (arg must  */
 /* match the format).  Both the setter and the getter acquire the       */
 /* allocator lock (in the reader mode in case of the getter) to avoid   */
-/* data race.  In GC v7.1 and before, the setter returned the old       */
-/* warn_proc value.                                                     */
-typedef void (GC_CALLBACK * GC_warn_proc)(char * /* msg */,
-                                          GC_word /* arg */);
+/* data race.  In GC v7.1 and before: the setter returned the value of  */
+/* old warn_proc.  In GC v8.2.x and before: msg pointer type had no     */
+/* const qualifier.                                                     */
+typedef void (GC_CALLBACK * GC_warn_proc)(const char * /* msg */,
+                                          GC_uintptr_t /* arg */);
 GC_API void GC_CALL GC_set_warn_proc(GC_warn_proc /* p */) GC_ATTR_NONNULL(1);
-/* GC_get_warn_proc returns the current warn_proc.                      */
 GC_API GC_warn_proc GC_CALL GC_get_warn_proc(void);
 
 /* GC_ignore_warn_proc may be used as an argument for GC_set_warn_proc  */
 /* to suppress all warnings (unless statistics printing is turned on).  */
-GC_API void GC_CALLBACK GC_ignore_warn_proc(char *, GC_word);
+GC_API void GC_CALLBACK GC_ignore_warn_proc(const char *, GC_uintptr_t);
 
 /* Change file descriptor of GC log.  Unavailable on some targets.      */
 GC_API void GC_CALL GC_set_log_fd(int);
@@ -1571,7 +1605,7 @@ GC_API void GC_CALL GC_abort_on_oom(void);
 /* a race with the collector (e.g., one thread might fetch hidden link  */
 /* value, while another thread might collect the relevant object and    */
 /* reuse the free space for another object).                            */
-typedef GC_word GC_hidden_pointer;
+typedef GC_uintptr_t GC_hidden_pointer;
 #define GC_HIDE_POINTER(p) (~(GC_hidden_pointer)(p))
 #define GC_REVEAL_POINTER(p) ((void *)GC_HIDE_POINTER(p))
 
@@ -1926,11 +1960,11 @@ GC_API void GC_CALL GC_dump_finalization(void);
 /* Note that GC_PTR_ADD evaluates the first argument more than once.    */
 #if defined(GC_DEBUG) && (defined(__GNUC__) || defined(__clang__))
 # define GC_PTR_ADD3(x, n, type_of_result) \
-        ((type_of_result)GC_same_obj((x)+(n), (x)))
+        ((type_of_result)GC_same_obj((x) + (n), (x)))
 # define GC_PRE_INCR3(x, n, type_of_result) \
-        ((type_of_result)GC_pre_incr((void **)(&(x)), (n)*sizeof(*x)))
+        ((type_of_result)GC_pre_incr((void **)&(x), (n) * sizeof(*(x))))
 # define GC_POST_INCR3(x, n, type_of_result) \
-        ((type_of_result)GC_post_incr((void **)(&(x)), (n)*sizeof(*x)))
+        ((type_of_result)GC_post_incr((void **)&(x), (n) * sizeof(*(x))))
 # define GC_PTR_ADD(x, n) GC_PTR_ADD3(x, n, __typeof__(x))
 # define GC_PRE_INCR(x, n) GC_PRE_INCR3(x, n, __typeof__(x))
 # define GC_POST_INCR(x) GC_POST_INCR3(x, 1, __typeof__(x))
@@ -1939,7 +1973,7 @@ GC_API void GC_CALL GC_dump_finalization(void);
   /* We can't do this right without typeof, which ANSI decided was not    */
   /* sufficiently useful.  Without it we resort to the non-debug version. */
   /* TODO: This should eventually support C++0x decltype. */
-# define GC_PTR_ADD(x, n) ((x)+(n))
+# define GC_PTR_ADD(x, n) ((x) + (n))
 # define GC_PRE_INCR(x, n) ((x) += (n))
 # define GC_POST_INCR(x) ((x)++)
 # define GC_POST_DECR(x) ((x)--)
@@ -1974,12 +2008,12 @@ GC_API void GC_CALL GC_debug_ptr_store_and_dirty(void * /* p */,
 # endif
 #endif
 
-/* This returns a list of objects, linked through their first word.     */
-/* Its use can greatly reduce lock contention problems, since the       */
-/* allocator lock can be acquired and released many fewer times.        */
-/* Note that there is no "atomic" version of this function, as          */
-/* otherwise the links would not be seen by the collector.              */
-/* If the argument is zero, then it is treated as one.                  */
+/* This returns a list of objects with the link pointer located at the  */
+/* beginning of each object.  The use of such list can greatly reduce   */
+/* lock contention problems, since the allocator lock can be acquired   */
+/* and released many fewer times.  Note that there is no "atomic"       */
+/* version of this function, as otherwise the links would not be seen   */
+/* by the collector.  If the argument is zero, then it is treated as 1. */
 GC_API GC_ATTR_MALLOC void * GC_CALL GC_malloc_many(size_t /* lb */);
 #define GC_NEXT(p) (*(void * *)(p))     /* Retrieve the next element    */
                                         /* in the returned list.        */
@@ -2049,13 +2083,6 @@ GC_API void GC_CALL GC_register_has_static_roots_callback(
 #     else
 #       define DECLSPEC_NORETURN __declspec(noreturn)
 #     endif
-#   endif
-
-#   if !defined(_UINTPTR_T) && !defined(_UINTPTR_T_DEFINED) \
-       && !defined(UINTPTR_MAX)
-      typedef GC_word GC_uintptr_t;
-#   else
-      typedef uintptr_t GC_uintptr_t;
 #   endif
 
 #   ifdef _WIN64

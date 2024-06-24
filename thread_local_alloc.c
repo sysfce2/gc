@@ -31,9 +31,8 @@ GC_key_t GC_thread_key;
 
 static GC_bool keys_initialized;
 
-/* Return a single nonempty freelist fl to the global one pointed to    */
+/* Return a single nonempty free list fl to the global one pointed to   */
 /* by gfl.                                                              */
-
 static void return_single_freelist(void *fl, void **gfl)
 {
     if (NULL == *gfl) {
@@ -54,7 +53,7 @@ static void return_single_freelist(void *fl, void **gfl)
     }
 }
 
-/* Recover the contents of the freelist array fl into the global one gfl. */
+/* Recover the contents of the free-list array fl into the global one gfl. */
 static void return_freelists(void **fl, void **gfl)
 {
     int i;
@@ -65,12 +64,12 @@ static void return_freelists(void **fl, void **gfl)
         }
         /* Clear fl[i], since the thread structure may hang around.     */
         /* Do it in a way that is likely to trap if we access it.       */
-        fl[i] = (ptr_t)HBLKSIZE;
+        fl[i] = (ptr_t)(GC_uintptr_t)HBLKSIZE;
     }
-    /* The 0 granule freelist really contains 1 granule objects.        */
+    /* The 0 granule free list really contains 1 granule objects.       */
     if (ADDR(fl[0]) >= HBLKSIZE
 #       ifdef GC_GCJ_SUPPORT
-          && fl[0] != ERROR_FL
+          && ADDR(fl[0]) != ERROR_FL
 #       endif
        ) {
         return_single_freelist(fl[0], &gfl[1]);
@@ -112,17 +111,17 @@ GC_INNER void GC_init_thread_local(GC_tlfs p)
     }
     for (j = 0; j < GC_TINY_FREELISTS; ++j) {
         for (k = 0; k < THREAD_FREELISTS_KINDS; ++k) {
-            p -> _freelists[k][j] = (void *)(word)1;
+            p -> _freelists[k][j] = (void *)(GC_uintptr_t)1;
         }
 #       ifdef GC_GCJ_SUPPORT
-            p -> gcj_freelists[j] = (void *)(word)1;
+            p -> gcj_freelists[j] = (void *)(GC_uintptr_t)1;
 #       endif
     }
-    /* The size 0 free lists are handled like the regular free lists,   */
-    /* to ensure that the explicit deallocation works.  However,        */
+    /* The zero-sized free list is handled like the regular free list,  */
+    /* to ensure that the explicit deallocation works.  However, an     */
     /* allocation of a size 0 "gcj" object is always an error.          */
 #   ifdef GC_GCJ_SUPPORT
-        p -> gcj_freelists[0] = ERROR_FL;
+        p -> gcj_freelists[0] = MAKE_CPTR(ERROR_FL);
 #   endif
 }
 
@@ -203,14 +202,14 @@ GC_API GC_ATTR_MALLOC void * GC_CALL GC_malloc_kind(size_t lb, int k)
 
 /* Gcj-style allocation without locks is extremely tricky.  The         */
 /* fundamental issue is that we may end up marking a free list, which   */
-/* has freelist links instead of "vtable" pointers.  That is usually    */
+/* has free-list links instead of "vtable" pointers.  That is usually   */
 /* OK, since the next object on the free list will be cleared, and      */
 /* will thus be interpreted as containing a zero descriptor.  That's    */
 /* fine if the object has not yet been initialized.  But there are      */
 /* interesting potential races.                                         */
 /* In the case of incremental collection, this seems hopeless, since    */
 /* the marker may run asynchronously, and may pick up the pointer to    */
-/* the next freelist entry (which it thinks is a vtable pointer), get   */
+/* the next free-list entry (which it thinks is a vtable pointer), get  */
 /* suspended for a while, and then see an allocated object instead      */
 /* of the vtable.  This may be avoidable with either a handshake with   */
 /* the collector or, probably more easily, by moving the free list      */
@@ -219,13 +218,13 @@ GC_API GC_ATTR_MALLOC void * GC_CALL GC_malloc_kind(size_t lb, int k)
 /* are not necessarily free.  And there may be cache fill order issues. */
 /* For now, we punt with incremental GC.  This probably means that      */
 /* incremental GC should be enabled before we fork a second thread.     */
-/* Unlike the other thread local allocation calls, we assume that the   */
+/* Unlike the other thread-local allocation calls, we assume that the   */
 /* collector has been explicitly initialized.                           */
 GC_API GC_ATTR_MALLOC void * GC_CALL GC_gcj_malloc(size_t lb,
-                                        void *ptr_to_struct_containing_descr)
+                                                   const void *vtable_ptr)
 {
   if (EXPECT(GC_incremental, FALSE)) {
-    return GC_core_gcj_malloc(lb, ptr_to_struct_containing_descr, 0);
+    return GC_core_gcj_malloc(lb, vtable_ptr, 0 /* flags */);
   } else {
     size_t lg = ALLOC_REQUEST_GRANS(lb);
     void *result;
@@ -234,16 +233,15 @@ GC_API GC_ATTR_MALLOC void * GC_CALL GC_gcj_malloc(size_t lb,
     GC_ASSERT(GC_gcjobjfreelist != NULL);
     tiny_fl = ((GC_tlfs)GC_getspecific(GC_thread_key))->gcj_freelists;
     GC_FAST_MALLOC_GRANS(result, lg, tiny_fl, DIRECT_GRANULES, GC_gcj_kind,
-                         GC_core_gcj_malloc(lb, ptr_to_struct_containing_descr,
-                                            0 /* flags */),
-                         {AO_compiler_barrier();
-                          *(void **)result = ptr_to_struct_containing_descr;});
+                         GC_core_gcj_malloc(lb, vtable_ptr, 0 /* flags */),
+                         do { AO_compiler_barrier();
+                           *(const void **)result = vtable_ptr; } while(0));
         /* This forces the initialization of the "method ptr".          */
         /* This is necessary to ensure some very subtle properties      */
         /* required if a GC is run in the middle of such an allocation. */
         /* Here we implicitly also assume atomicity for the free list.  */
         /* and method pointer assignments.                              */
-        /* We must update the freelist before we store the pointer.     */
+        /* We must update the free list before we store the pointer.    */
         /* Otherwise a GC at this point would see a corrupted           */
         /* free list.                                                   */
         /* A real memory barrier is not needed, since the               */
@@ -252,8 +250,8 @@ GC_API GC_ATTR_MALLOC void * GC_CALL GC_gcj_malloc(size_t lb,
         /* We assert that any concurrent marker will stop us.           */
         /* Thus it is impossible for a mark procedure to see the        */
         /* allocation of the next object, but to see this object        */
-        /* still containing a free list pointer.  Otherwise the         */
-        /* marker, by misinterpreting the freelist link as a vtable     */
+        /* still containing a free-list pointer.  Otherwise the         */
+        /* marker, by misinterpreting the free-list link as a vtable    */
         /* pointer, might find a random "mark descriptor" in the next   */
         /* object.                                                      */
     return result;
@@ -265,7 +263,7 @@ GC_API GC_ATTR_MALLOC void * GC_CALL GC_gcj_malloc(size_t lb,
 /* The thread support layer must arrange to mark thread-local   */
 /* free lists explicitly, since the link field is often         */
 /* invisible to the marker.  It knows how to find all threads;  */
-/* we take care of an individual thread freelist structure.     */
+/* we take care of an individual thread free-list structure.    */
 GC_INNER void GC_mark_thread_local_fls_for(GC_tlfs p)
 {
     ptr_t q;

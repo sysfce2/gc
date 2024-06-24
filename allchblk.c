@@ -58,7 +58,7 @@
                                 /* as used by GNU GCJ currently.        */
 
 GC_API void GC_CALL GC_iterate_free_hblks(GC_walk_free_blk_fn fn,
-                                          GC_word client_data)
+                                          void *client_data)
 {
   int i;
 
@@ -66,7 +66,7 @@ GC_API void GC_CALL GC_iterate_free_hblks(GC_walk_free_blk_fn fn,
     struct hblk *h;
 
     for (h = GC_hblkfreelist[i]; h != NULL; h = HDR(h) -> hb_next) {
-      (*fn)(h, i, client_data);
+      fn(h, i, client_data);
     }
   }
 }
@@ -93,7 +93,7 @@ GC_INLINE int GC_enough_large_bytes_left(void)
     return 0;
 }
 
-/* Map a number of blocks to the appropriate large block free list index. */
+/* Map a number of blocks to the appropriate large block free-list index. */
 STATIC int GC_hblk_fl_from_blocks(size_t blocks_needed)
 {
     if (blocks_needed <= UNIQUE_THRESHOLD) return (int)blocks_needed;
@@ -112,10 +112,14 @@ STATIC int GC_hblk_fl_from_blocks(size_t blocks_needed)
 # endif /* !USE_MUNMAP */
 
 #if !defined(NO_DEBUGGING) || defined(GC_ASSERTIONS)
-  static void GC_CALLBACK add_hb_sz(struct hblk *h, int i, GC_word client_data)
+  static void GC_CALLBACK add_hb_sz(struct hblk *h, int i,
+                                    void *total_free_ptr)
   {
       UNUSED_ARG(i);
-      *(word *)client_data += HDR(h) -> hb_sz;
+      *(word *)total_free_ptr += HDR(h) -> hb_sz;
+#     if defined(CPPCHECK)
+          GC_noop1_ptr(h);
+#     endif
   }
 
   /* Should return the same value as GC_large_free_bytes.       */
@@ -123,17 +127,20 @@ STATIC int GC_hblk_fl_from_blocks(size_t blocks_needed)
   {
       word total_free = 0;
 
-      GC_iterate_free_hblks(add_hb_sz, (word)(&total_free));
+      GC_iterate_free_hblks(add_hb_sz, &total_free);
       return total_free;
   }
 #endif /* !NO_DEBUGGING || GC_ASSERTIONS */
 
 # if !defined(NO_DEBUGGING)
   static void GC_CALLBACK print_hblkfreelist_item(struct hblk *h, int i,
-                                                  GC_word prev_index_ptr)
+                                                  void *prev_index_ptr)
   {
     hdr *hhdr = HDR(h);
 
+#   if defined(CPPCHECK)
+      GC_noop1_ptr(h);
+#   endif
     if (i != *(int *)prev_index_ptr) {
       GC_printf("Free list %d (total size %lu):\n",
                 i, (unsigned long)GC_free_bytes[i]);
@@ -152,7 +159,7 @@ STATIC int GC_hblk_fl_from_blocks(size_t blocks_needed)
     word total;
     int prev_index = -1;
 
-    GC_iterate_free_hblks(print_hblkfreelist_item, (word)(&prev_index));
+    GC_iterate_free_hblks(print_hblkfreelist_item, &prev_index);
     GC_printf("GC_large_free_bytes: %lu\n",
               (unsigned long)GC_large_free_bytes);
     total = GC_compute_large_free_bytes();
@@ -161,17 +168,17 @@ STATIC int GC_hblk_fl_from_blocks(size_t blocks_needed)
                     (unsigned long)total);
   }
 
-/* Return the free list index on which the block described by the header */
+/* Return the free-list index on which the block described by the header */
 /* appears, or -1 if it appears nowhere.                                 */
 static int free_list_index_of(const hdr *wanted)
 {
     int i;
 
     for (i = 0; i <= N_HBLK_FLS; ++i) {
-      struct hblk * h;
-      hdr * hhdr;
+      const struct hblk * h;
+      const hdr * hhdr;
 
-      for (h = GC_hblkfreelist[i]; h != 0; h = hhdr -> hb_next) {
+      for (h = GC_hblkfreelist[i]; h != NULL; h = hhdr -> hb_next) {
         hhdr = HDR(h);
         if (hhdr == wanted) return i;
       }
@@ -652,7 +659,7 @@ STATIC void GC_split_block(struct hblk *hbp, hdr *hhdr, struct hblk *last_hbp,
     struct hblk *prev = hhdr -> hb_prev;
     struct hblk *next = hhdr -> hb_next;
 
-    /* Replace hbp with last_hbp on its freelist.      */
+    /* Replace hbp with last_hbp on its free list.  */
     last_hdr -> hb_prev = prev;
     last_hdr -> hb_next = next;
     last_hdr -> hb_sz = total_size - h_size;
@@ -916,7 +923,7 @@ STATIC struct hblk *GC_allochblk_nth(size_t lb_adjusted, int k,
       if (size_needed == HBLKSIZE && 0 == align_m1
           && !GC_find_leak && IS_MAPPED(hhdr)
           && (++GC_drop_blacklisted_count & 3) == 0) {
-        struct hblk *prev = hhdr -> hb_prev;
+        const struct hblk *prev = hhdr -> hb_prev;
 
         drop_hblk_in_chunks(index, hbp, hhdr);
         if (NULL == prev) goto retry;
@@ -970,7 +977,7 @@ STATIC struct hblk *GC_allochblk_nth(size_t lb_adjusted, int k,
         /* Note: This may leave adjacent, mapped free blocks. */
       }
 #   endif
-    /* hbp may be on the wrong freelist; the parameter index is important. */
+    /* hbp may be on the wrong free list; the parameter index is important. */
     hbp = GC_get_first_part(hbp, hhdr, (size_t)size_needed, index);
     if (EXPECT(NULL == hbp, FALSE)) return NULL;
 
@@ -1018,7 +1025,7 @@ STATIC struct hblk *GC_allochblk_nth(size_t lb_adjusted, int k,
       GC_ASSERT(I_HOLD_LOCK());
 #   endif
     /* Prevent treating this function by the compiler as a no-op one.   */
-    NOOP1_PTR(p);
+    GC_noop1_ptr(p);
   }
 #endif /* VALGRIND_TRACKING */
 

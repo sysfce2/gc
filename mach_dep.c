@@ -259,7 +259,7 @@ GC_INNER void GC_with_callee_saves_pushed(GC_with_callee_saves_func fn,
           unsigned short old_fcw;
 
 #         if defined(CPPCHECK)
-            NOOP1_PTR(&old_fcw);
+            GC_noop1_ptr(&old_fcw);
 #         endif
           __asm__ __volatile__ ("fstcw %0" : "=m" (*&old_fcw));
 #       else
@@ -341,11 +341,11 @@ GC_INNER void GC_with_callee_saves_pushed(GC_with_callee_saves_func fn,
   /* callees don't really need it.                                      */
   /* Cast fn to a volatile type to prevent call inlining.               */
   (*(GC_with_callee_saves_func volatile *)&fn)(volatile_arg,
-                        (/* no volatile */ void *)(word)context);
+                        CAST_AWAY_VOLATILE_PVOID(context));
   /* Strongly discourage the compiler from treating the above   */
   /* as a tail-call, since that would pop the register          */
   /* contents before we get a chance to look at them.           */
-  GC_noop1(COVERT_DATAFLOW(&dummy));
+  GC_noop1(COVERT_DATAFLOW(ADDR(&dummy)));
 # undef volatile_arg
 }
 

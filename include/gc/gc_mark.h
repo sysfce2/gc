@@ -63,7 +63,7 @@
 /* to invoke the normal mark procedure instead.                         */
 /* WARNING: Such a mark procedure may be invoked on an unused object    */
 /* residing on a free list.  Such objects are cleared, except for a     */
-/* free list link field in the first word.  Thus mark procedures may    */
+/* free-list link field in the first word.  Thus mark procedures may    */
 /* not count on the presence of a type descriptor, and must handle this */
 /* case correctly somehow.  Also, a mark procedure should be prepared   */
 /* to be executed concurrently from the marker threads (the later ones  */
@@ -85,19 +85,19 @@ typedef struct GC_ms_entry * (GC_CALLBACK * GC_mark_proc)(GC_word * /* addr */,
 
 /* Object descriptors on mark stack or in objects.  Low order two       */
 /* bits are tags distinguishing among the following 4 possibilities     */
-/* for the rest (high order) bits.                                      */
+/* for the rest (high-order) bits.                                      */
 #define GC_DS_TAG_BITS 2
 #define GC_DS_TAGS   ((1U << GC_DS_TAG_BITS) - 1)
 #define GC_DS_LENGTH 0  /* The entire word is a length in bytes that    */
                         /* must be a multiple of 4.                     */
-#define GC_DS_BITMAP 1  /* The high order bits are describing pointer   */
+#define GC_DS_BITMAP 1  /* The high-order bits are describing pointer   */
                         /* fields.  The most significant bit is set if  */
                         /* the first word is a pointer.                 */
                         /* (This unconventional ordering sometimes      */
                         /* makes the marker slightly faster.)           */
-                        /* Zeroes indicate definite nonpointers.  Ones  */
+                        /* Zeroes indicate definite non-pointers; ones  */
                         /* indicate possible pointers.                  */
-                        /* Only usable if pointers are word aligned.    */
+                        /* Only usable if pointers are word-aligned.    */
 #define GC_DS_PROC   2
                         /* The objects referenced by this object can be */
                         /* pushed on the mark stack by invoking         */
@@ -212,26 +212,26 @@ GC_API GC_ATTR_DEPRECATED
 /* size and kind of object.                                             */
 GC_API GC_ATTR_CONST size_t GC_CALL GC_get_hblk_size(void);
 
+typedef void (GC_CALLBACK * GC_walk_hblk_fn)(struct GC_hblk_s *,
+                                             void * /* client_data */);
+
+/* Apply fn to each allocated heap block.  It is the responsibility     */
+/* of the caller to avoid data race during the function execution (e.g. */
+/* by acquiring the allocator lock at least in the reader mode).        */
+GC_API void GC_CALL GC_apply_to_all_blocks(GC_walk_hblk_fn,
+                                void * /* client_data */) GC_ATTR_NONNULL(1);
+
 /* Same as GC_walk_hblk_fn but with index of the free list.             */
 typedef void (GC_CALLBACK * GC_walk_free_blk_fn)(struct GC_hblk_s *,
                                                  int /* index */,
-                                                 GC_word /* client_data */);
+                                                 void * /* client_data */);
 
 /* Apply fn to each completely empty heap block.  It is the             */
 /* responsibility of the caller to avoid data race during the function  */
 /* execution (e.g. by acquiring the allocator lock at least in the      */
 /* reader mode).                                                        */
 GC_API void GC_CALL GC_iterate_free_hblks(GC_walk_free_blk_fn,
-                                GC_word /* client_data */) GC_ATTR_NONNULL(1);
-
-typedef void (GC_CALLBACK * GC_walk_hblk_fn)(struct GC_hblk_s *,
-                                             GC_word /* client_data */);
-
-/* Apply fn to each allocated heap block.  It is the responsibility     */
-/* of the caller to avoid data race during the function execution (e.g. */
-/* by acquiring the allocator lock at least in the reader mode).        */
-GC_API void GC_CALL GC_apply_to_all_blocks(GC_walk_hblk_fn,
-                                GC_word /* client_data */) GC_ATTR_NONNULL(1);
+                                void * /* client_data */) GC_ATTR_NONNULL(1);
 
 /* If there are likely to be false references to a block starting at h  */
 /* of the indicated length, then return the next plausible starting     */
@@ -239,7 +239,7 @@ GC_API void GC_CALL GC_apply_to_all_blocks(GC_walk_hblk_fn,
 /* NULL is returned.  Assumes the allocator lock is held at least in    */
 /* the reader mode but no assertion about it by design.                 */
 GC_API struct GC_hblk_s *GC_CALL GC_is_black_listed(struct GC_hblk_s *,
-                                                    GC_word /* len */);
+                                                    size_t /* len */);
 
 /* Return the number of set mark bits for the heap block where object   */
 /* p is located.  Defined only if the library has been compiled         */
@@ -250,7 +250,7 @@ GC_API unsigned GC_CALL GC_count_set_marks_in_hblk(const void * /* p */);
 /* custom mark procedures, by language runtimes.                        */
 /* The _inner versions assume the caller holds the allocator lock.      */
 
-/* Return a new free list array.        */
+/* Return a new free-list array.    */
 GC_API void ** GC_CALL GC_new_free_list(void);
 GC_API void ** GC_CALL GC_new_free_list_inner(void);
 

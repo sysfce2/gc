@@ -119,7 +119,7 @@ typedef struct thread_local_freelists {
         /* Note: Preserve *_freelists names for some clients.   */
 # ifdef GC_GCJ_SUPPORT
     void * gcj_freelists[GC_TINY_FREELISTS];
-#   define ERROR_FL ((void *)GC_WORD_MAX)
+#   define ERROR_FL GC_WORD_MAX
         /* Value used for gcj_freelists[-1]; allocation is      */
         /* erroneous.                                           */
 # endif
@@ -191,7 +191,7 @@ GC_INNER void GC_destroy_thread_local(GC_tlfs p);
 /* The thread support layer must arrange to mark thread-local   */
 /* free lists explicitly, since the link field is often         */
 /* invisible to the marker.  It knows how to find all threads;  */
-/* we take care of an individual thread freelist structure.     */
+/* we take care of an individual thread free-list structure.    */
 GC_INNER void GC_mark_thread_local_fls_for(GC_tlfs p);
 
 #ifdef GC_ASSERTIONS

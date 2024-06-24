@@ -13,7 +13,6 @@
  * Permission to modify the code and to distribute modified code is granted,
  * provided the above notices are retained, and a notice that the code was
  * modified is included with the above copyright notice.
- *
  */
 
 #include "private/gc_priv.h"
@@ -21,7 +20,7 @@
 /*
  * Separate free lists are maintained for different sized objects
  * up to MAXOBJBYTES.
- * The call GC_allocobj(lg, k) ensures that the freelist for
+ * The call GC_allocobj(lg, k) ensures that the free list for
  * kind k objects of size lg granules to a non-empty
  * free list. It returns a pointer to the first entry on the free list.
  * In a single-threaded world, GC_allocobj may be called to allocate
@@ -267,7 +266,7 @@ GC_API GC_stop_func GC_CALL GC_get_stop_func(void)
     time_diff = MS_TIME_DIFF(current_time, GC_start_time);
     nsec_diff = NS_FRAC_TIME_DIFF(current_time, GC_start_time);
 #   if defined(CPPCHECK)
-      NOOP1_PTR(&nsec_diff);
+      GC_noop1_ptr(&nsec_diff);
 #   endif
     if (time_diff >= GC_time_limit
         && (time_diff > GC_time_limit || nsec_diff >= GC_time_lim_nsec)) {
@@ -397,8 +396,8 @@ STATIC void GC_clear_a_few_frames(void)
 #     define CLEAR_NWORDS 64
 #   endif
     volatile word frames[CLEAR_NWORDS];
-    BZERO((/* no volatile */ word *)((word)frames),
-          CLEAR_NWORDS * sizeof(word));
+
+    BZERO(CAST_AWAY_VOLATILE_PVOID(frames), sizeof(frames));
 }
 
 GC_API void GC_CALL GC_start_incremental_collection(void)
@@ -1013,7 +1012,7 @@ GC_INNER void GC_set_fl_marks(ptr_t q)
         q = (ptr_t)obj_link(q);
         if (NULL == q) break;
 #       ifdef GC_ASSERTIONS
-          /* Detect a cycle in the freelist.  The algorithm is to   */
+          /* Detect a cycle in the free list.  The algorithm is to  */
           /* have a second "twice faster" iterator over the list -  */
           /* the second iterator meets the first one in case of     */
           /* a cycle existing in the list.                          */
@@ -1060,7 +1059,7 @@ GC_INNER void GC_set_fl_marks(ptr_t q)
         AO_t *next;
 
         if (!GC_is_marked(p)) {
-          ABORT_ARG2("Unmarked local free list entry",
+          ABORT_ARG2("Unmarked local free-list entry",
                      ": object %p on list %p", (void *)p, (void *)list);
         }
 
@@ -1224,7 +1223,7 @@ STATIC void GC_finish_collection(void)
 #     endif
     }
 
-    /* Clear free list mark bits, in case they got accidentally marked   */
+    /* Clear free-list mark bits, in case they got accidentally marked   */
     /* (or GC_find_leak is set and they were intentionally marked).      */
     /* Also subtract memory remaining from GC_bytes_found count.         */
     /* Note that composite objects on free list are cleared.             */
@@ -1514,7 +1513,7 @@ STATIC void GC_add_to_heap(struct hblk *h, size_t bytes)
                                   old_capacity * sizeof(struct HeapSect));
 #     else
         /* TODO: implement GWW-aware recycling as in alloc_mark_stack */
-        NOOP1_PTR(old_heap_sects);
+        GC_noop1_ptr(old_heap_sects);
 #     endif
     }
 }
@@ -1544,8 +1543,8 @@ STATIC void GC_add_to_heap(struct hblk *h, size_t bytes)
   }
 #endif
 
-void * GC_least_plausible_heap_addr = (void *)GC_WORD_MAX;
-void * GC_greatest_plausible_heap_addr = 0;
+void * GC_least_plausible_heap_addr = MAKE_CPTR(GC_WORD_MAX);
+void * GC_greatest_plausible_heap_addr = NULL;
 
 STATIC word GC_max_heapsize = 0;
 
@@ -1833,12 +1832,12 @@ GC_INNER ptr_t GC_allocobj(size_t lg, int k)
         GC_continue_reclaim(lg, k);
       EXIT_GC();
 #     if defined(CPPCHECK)
-        NOOP1_PTR(&flh);
+        GC_noop1_ptr(&flh);
 #     endif
       if (NULL == *flh) {
         GC_new_hblk(lg, k);
 #       if defined(CPPCHECK)
-          NOOP1_PTR(&flh);
+          GC_noop1_ptr(&flh);
 #       endif
         if (NULL == *flh) {
           ENTER_GC();

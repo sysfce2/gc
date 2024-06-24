@@ -212,6 +212,10 @@
 # ifdef GC_USE_DLOPEN_WRAP
     STATIC GC_bool GC_syms_initialized = FALSE;
 
+    /* Resolve a symbol from the dynamic library (given by a handle)    */
+    /* and cast it to the given functional type.                        */
+#   define TYPED_DLSYM(fn, h, name) CAST_THRU_UINTPTR(fn, dlsym(h, name))
+
     STATIC void GC_init_real_syms(void)
     {
       void *dl_handle;
@@ -226,28 +230,28 @@
           if (NULL == dl_handle) ABORT("Couldn't open libpthread");
         }
 #     endif
-      REAL_FUNC(pthread_create) = (GC_pthread_create_t)(word)
-                                dlsym(dl_handle, "pthread_create");
+      REAL_FUNC(pthread_create) = TYPED_DLSYM(GC_pthread_create_t, dl_handle,
+                                              "pthread_create");
 #     ifdef RTLD_NEXT
         if (REAL_FUNC(pthread_create) == 0)
           ABORT("pthread_create not found"
                 " (probably -lgc is specified after -lpthread)");
 #     endif
 #     ifndef GC_NO_PTHREAD_SIGMASK
-        REAL_FUNC(pthread_sigmask) = (GC_pthread_sigmask_t)(word)
-                                dlsym(dl_handle, "pthread_sigmask");
+        REAL_FUNC(pthread_sigmask) = TYPED_DLSYM(GC_pthread_sigmask_t,
+                                                 dl_handle, "pthread_sigmask");
 #     endif
-      REAL_FUNC(pthread_join) = (GC_pthread_join_t)(word)
-                                dlsym(dl_handle, "pthread_join");
-      REAL_FUNC(pthread_detach) = (GC_pthread_detach_t)(word)
-                                dlsym(dl_handle, "pthread_detach");
+      REAL_FUNC(pthread_join) = TYPED_DLSYM(GC_pthread_join_t, dl_handle,
+                                            "pthread_join");
+      REAL_FUNC(pthread_detach) = TYPED_DLSYM(GC_pthread_detach_t, dl_handle,
+                                              "pthread_detach");
 #     ifndef GC_NO_PTHREAD_CANCEL
-        REAL_FUNC(pthread_cancel) = (GC_pthread_cancel_t)(word)
-                                dlsym(dl_handle, "pthread_cancel");
+        REAL_FUNC(pthread_cancel) = TYPED_DLSYM(GC_pthread_cancel_t,
+                                                dl_handle, "pthread_cancel");
 #     endif
 #     ifdef GC_HAVE_PTHREAD_EXIT
-        REAL_FUNC(pthread_exit) = (GC_pthread_exit_t)(word)
-                                dlsym(dl_handle, "pthread_exit");
+        REAL_FUNC(pthread_exit) = TYPED_DLSYM(GC_pthread_exit_t, dl_handle,
+                                              "pthread_exit");
 #     endif
       GC_syms_initialized = TRUE;
     }
@@ -1558,7 +1562,7 @@ GC_INNER_WIN32THREAD void GC_record_stack_base(GC_stack_context_t crtn,
   if ((crtn -> stack_end = (ptr_t)(sb -> mem_base)) == NULL)
     ABORT("Bad stack base in GC_register_my_thread");
 # ifdef E2K
-    crtn -> ps_ofs = (size_t)ADDR(sb -> reg_base);
+    crtn -> ps_ofs = (size_t)(GC_uintptr_t)(sb -> reg_base);
 # elif defined(IA64)
     crtn -> backing_store_end = (ptr_t)(sb -> reg_base);
 # elif defined(I386) && defined(GC_WIN32_THREADS)
@@ -1615,7 +1619,7 @@ GC_INNER void GC_thr_init(void)
 
 # ifdef INCLUDE_LINUX_THREAD_DESCR
     /* Explicitly register the region including the address     */
-    /* of a thread local variable.  This should include thread  */
+    /* of a thread-local variable.  This should include thread  */
     /* locals for the main thread, except for those allocated   */
     /* in response to dlopen calls.                             */
     {
@@ -1623,7 +1627,7 @@ GC_INNER void GC_thr_init(void)
       ptr_t main_thread_start, main_thread_end;
       if (!GC_enclosing_writable_mapping(thread_local_addr,
                                 &main_thread_start, &main_thread_end)) {
-        ABORT("Failed to find mapping for main thread thread locals");
+        ABORT("Failed to find TLS mapping for the primordial thread");
       } else {
         /* main_thread_start and main_thread_end are initialized.       */
         GC_add_roots_inner(main_thread_start, main_thread_end, FALSE);
@@ -1766,7 +1770,7 @@ GC_INNER void GC_thr_init(void)
 #endif /* !GC_WIN32_THREADS */
 
 /* Perform all initializations, including those that may require        */
-/* allocation, e.g. initialize thread local free lists if used.         */
+/* allocation, e.g. initialize thread-local free lists if used.         */
 /* Must be called before a thread is created.                           */
 GC_INNER void GC_init_parallel(void)
 {
@@ -1993,7 +1997,7 @@ GC_API void GC_CALL GC_set_stackbottom(void *gc_thread_handle,
 
     crtn -> stack_end = (ptr_t)(sb -> mem_base);
 #   ifdef E2K
-      crtn -> ps_ofs = (size_t)ADDR(sb -> reg_base);
+      crtn -> ps_ofs = (size_t)(GC_uintptr_t)(sb -> reg_base);
 #   elif defined(IA64)
       crtn -> backing_store_end = (ptr_t)(sb -> reg_base);
 #   endif
@@ -2014,7 +2018,8 @@ GC_API void * GC_CALL GC_get_my_stackbottom(struct GC_stack_base *sb)
     crtn = me -> crtn;
     sb -> mem_base = crtn -> stack_end;
 #   ifdef E2K
-      sb -> reg_base = (void *)(word)(crtn -> ps_ofs);
+      /* Store the offset in the procedure stack, not address.  */
+      sb -> reg_base = (void *)(GC_uintptr_t)(crtn -> ps_ofs);
 #   elif defined(IA64)
       sb -> reg_base = crtn -> backing_store_end;
 #   endif
@@ -2058,7 +2063,7 @@ GC_API void * GC_CALL GC_call_with_gc_active(GC_fn_type fn, void *client_data)
       /* Cast fn to a volatile type to prevent its call inlining.   */
       client_data = (*(GC_fn_type volatile *)&fn)(client_data);
       /* Prevent treating the above as a tail call.     */
-      GC_noop1(COVERT_DATAFLOW(&stacksect));
+      GC_noop1(COVERT_DATAFLOW(ADDR(&stacksect)));
       return client_data; /* result */
     }
 
@@ -2109,7 +2114,7 @@ GC_API void * GC_CALL GC_call_with_gc_active(GC_fn_type fn, void *client_data)
     GC_ASSERT(me -> crtn == crtn);
     GC_ASSERT(crtn -> traced_stack_sect == &stacksect);
 #   ifdef CPPCHECK
-      NOOP1_PTR(crtn -> traced_stack_sect);
+      GC_noop1_ptr(crtn -> traced_stack_sect);
 #   endif
     crtn -> traced_stack_sect = stacksect.prev;
 #   ifdef E2K
@@ -2372,7 +2377,7 @@ GC_API int GC_CALL GC_register_my_thread(const struct GC_stack_base *sb)
 
     /* After the join, thread id may have been recycled.                */
     READER_LOCK();
-    t = (GC_thread)COVERT_DATAFLOW(GC_lookup_by_pthread(thread));
+    t = (GC_thread)COVERT_DATAFLOW_P(GC_lookup_by_pthread(thread));
       /* This is guaranteed to be the intended one, since the thread id */
       /* cannot have been recycled by pthreads.                         */
     READER_UNLOCK();
@@ -2418,7 +2423,7 @@ GC_API int GC_CALL GC_register_my_thread(const struct GC_stack_base *sb)
 
     INIT_REAL_SYMS();
     READER_LOCK();
-    t = (GC_thread)COVERT_DATAFLOW(GC_lookup_by_pthread(thread));
+    t = (GC_thread)COVERT_DATAFLOW_P(GC_lookup_by_pthread(thread));
     READER_UNLOCK();
     result = REAL_FUNC(pthread_detach)(thread);
     if (EXPECT(0 == result, TRUE)) {
@@ -2478,8 +2483,8 @@ GC_API int GC_CALL GC_register_my_thread(const struct GC_stack_base *sb)
 
     *pstart = psi -> start_routine;
     *pstart_arg = psi -> arg;
-#   if defined(DEBUG_THREADS) && defined(FUNCPTR_IS_WORD)
-      GC_log_printf("start_routine= %p\n", (void *)(word)(*pstart));
+#   if defined(DEBUG_THREADS) && defined(FUNCPTR_IS_DATAPTR)
+      GC_log_printf("start_routine= %p\n", CAST_THRU_UINTPTR(void*, *pstart));
 #   endif
     sem_post(&(psi -> registered));     /* Last action on *psi; */
                                         /* OK to deallocate.    */
@@ -2889,7 +2894,7 @@ GC_API int GC_CALL GC_register_my_thread(const struct GC_stack_base *sb)
     }
   }
 
-  /* Collector must wait for a freelist builders for 2 reasons:         */
+  /* Collector must wait for free-list builders for 2 reasons:          */
   /* 1) Mark bits may still be getting examined without lock.           */
   /* 2) Partial free lists referenced only by locals may not be scanned */
   /*    correctly, e.g. if they contain "pointer-free" objects, since   */

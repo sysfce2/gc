@@ -48,6 +48,11 @@ GC_API void GC_CALL GC_noop1(GC_word x)
 # endif
 }
 
+GC_API void GC_CALL GC_noop1_ptr(volatile void *p)
+{
+  GC_noop1(ADDR(p));
+}
+
 /* Initialize GC_obj_kinds properly and standard free lists properly.   */
 /* This must be done statically since they may be accessed before       */
 /* GC_init is called.                                                   */
@@ -211,7 +216,7 @@ GC_INNER void GC_set_hdr_marks(hdr *hhdr)
 }
 
 /* Clear all mark bits associated with block h. */
-static void GC_CALLBACK clear_marks_for_block(struct hblk *h, GC_word dummy)
+static void GC_CALLBACK clear_marks_for_block(struct hblk *h, void *dummy)
 {
     hdr * hhdr = HDR(h);
 
@@ -221,6 +226,9 @@ static void GC_CALLBACK clear_marks_for_block(struct hblk *h, GC_word dummy)
         /* explicitly deallocated.  This either frees the block, or     */
         /* the bit is cleared once the object is on the free list.      */
     GC_clear_hdr_marks(hhdr);
+#   if defined(CPPCHECK)
+        GC_noop1_ptr(h);
+#   endif
 }
 
 /* Slow but general routines for setting/clearing/asking about mark bits. */
@@ -275,7 +283,7 @@ GC_API int GC_CALL GC_is_marked(const void *p)
 GC_INNER void GC_clear_marks(void)
 {
     GC_ASSERT(GC_is_initialized); /* needed for GC_push_roots */
-    GC_apply_to_all_blocks(clear_marks_for_block, (word)0);
+    GC_apply_to_all_blocks(clear_marks_for_block, NULL);
     GC_objects_are_marked = FALSE;
     GC_mark_state = MS_INVALID;
     GC_scan_ptr = NULL;
@@ -615,7 +623,7 @@ STATIC mse * GC_signal_mark_stack_overflow(mse *msp)
     GC_COND_LOG_PRINTF("Mark stack overflow; current size: %lu entries\n",
                        (unsigned long)GC_mark_stack_size);
 #   if defined(CPPCHECK)
-      NOOP1_PTR(msp);
+      GC_noop1_ptr(msp);
 #   endif
     return msp - GC_MARK_STACK_DISCARDS;
 }
@@ -997,7 +1005,7 @@ STATIC mse * GC_steal_mark_stack(mse * low, mse * high, mse * local,
     }
     *next = p;
 #   if defined(CPPCHECK)
-        NOOP1_PTR(local);
+        GC_noop1_ptr(local);
 #   endif
     return top;
 }
@@ -1497,6 +1505,7 @@ GC_API void GC_CALL GC_push_proc(GC_word descr, void *obj)
   GC_INNER void GC_push_many_regs(const word *regs, unsigned count)
   {
     unsigned i;
+
     for (i = 0; i < count; i++)
       GC_PUSH_ONE_STACK((ptr_t)regs[i], MARKED_FROM_REGISTER);
   }
@@ -1511,7 +1520,7 @@ GC_API struct GC_ms_entry * GC_CALL GC_mark_and_push(void *obj,
     GET_HDR(obj, hhdr);
     if ((EXPECT(IS_FORWARDING_ADDR_OR_NIL(hhdr), FALSE)
          && (!GC_all_interior_pointers
-             || NULL == (hhdr = GC_find_header((ptr_t)GC_base(obj)))))
+             || NULL == (hhdr = GC_find_header(GC_base(obj)))))
         || EXPECT(HBLK_IS_FREE(hhdr), FALSE)) {
       GC_ADD_TO_BLACK_LIST_NORMAL(obj, (ptr_t)src);
       return mark_stack_top;
@@ -1565,63 +1574,66 @@ GC_INNER void
     /* which is very mildly suboptimal.                         */
     /* FIXME: We should probably add a header word to address   */
     /* this.                                                    */
+#   undef source
 }
-# undef source
 
 #ifdef TRACE_BUF
-
 # ifndef TRACE_ENTRIES
 #   define TRACE_ENTRIES 1000
 # endif
 
-struct trace_entry {
-    char * kind;
+  struct trace_entry {
+    const char *caller_fn_name;
     word gc_no;
     word bytes_allocd;
-    word arg1;
-    word arg2;
-} GC_trace_buf[TRACE_ENTRIES] = { { NULL, 0, 0, 0, 0 } };
+    GC_hidden_pointer arg1;
+    GC_hidden_pointer arg2;
+  } GC_trace_buf[TRACE_ENTRIES] = { { (const char *)NULL, 0, 0, 0, 0 } };
 
-void GC_add_trace_entry(char *kind, word arg1, word arg2)
-{
-    GC_trace_buf[GC_trace_buf_ptr].kind = kind;
-    GC_trace_buf[GC_trace_buf_ptr].gc_no = GC_gc_no;
-    GC_trace_buf[GC_trace_buf_ptr].bytes_allocd = GC_bytes_allocd;
-    GC_trace_buf[GC_trace_buf_ptr].arg1 = arg1 ^ SIGNB;
-    GC_trace_buf[GC_trace_buf_ptr].arg2 = arg2 ^ SIGNB;
-    GC_trace_buf_ptr++;
-    if (GC_trace_buf_ptr >= TRACE_ENTRIES) GC_trace_buf_ptr = 0;
-}
+  void GC_add_trace_entry(const char *caller_fn_name, ptr_t arg1, ptr_t arg2)
+  {
+    size_t i = GC_trace_buf_pos;
 
-GC_API void GC_CALL GC_print_trace_inner(GC_word gc_no)
-{
-    int i;
+    GC_trace_buf[i].caller_fn_name = caller_fn_name;
+    GC_trace_buf[i].gc_no = GC_gc_no;
+    GC_trace_buf[i].bytes_allocd = GC_bytes_allocd;
+    GC_trace_buf[i].arg1 = GC_HIDE_POINTER(arg1);
+    GC_trace_buf[i].arg2 = GC_HIDE_POINTER(arg2);
+    i++;
+    if (i >= TRACE_ENTRIES) i = 0;
+    GC_trace_buf_pos = i;
+  }
 
-    for (i = GC_trace_buf_ptr-1; i != GC_trace_buf_ptr; i--) {
+  GC_API void GC_CALL GC_print_trace_inner(GC_word gc_no)
+  {
+    size_t i;
+
+    for (i = GC_trace_buf_pos;; i--) {
         struct trace_entry *p;
 
-        if (i < 0) i = TRACE_ENTRIES-1;
-        p = GC_trace_buf + i;
+        if (0 == i) i = TRACE_ENTRIES;
+        p = &GC_trace_buf[i - 1];
         /* Compare gc_no values (p->gc_no is less than given gc_no) */
         /* taking into account that the counter may overflow.       */
-        if ((((p -> gc_no) - gc_no) & SIGNB) != 0 || p -> kind == 0) {
-            return;
+        if ((((p -> gc_no) - gc_no) & SIGNB) != 0
+            || NULL == p -> caller_fn_name) {
+          return;
         }
-        GC_printf("Trace:%s (gc:%u, bytes:%lu) %p, %p\n",
-                  p -> kind, (unsigned)(p -> gc_no),
+        GC_printf("Trace:%s (gc:%lu, bytes:%lu) %p, %p\n",
+                  p -> caller_fn_name, (unsigned long)(p -> gc_no),
                   (unsigned long)(p -> bytes_allocd),
-                  (void *)(p -> arg1 ^ SIGNB), (void *)(p -> arg2 ^ SIGNB));
+                  GC_REVEAL_POINTER(p -> arg1), GC_REVEAL_POINTER(p -> arg2));
+        if (i == GC_trace_buf_pos + 1) break;
     }
     GC_printf("Trace incomplete\n");
-}
+  }
 
-GC_API void GC_CALL GC_print_trace(GC_word gc_no)
-{
+  GC_API void GC_CALL GC_print_trace(GC_word gc_no)
+  {
     READER_LOCK();
     GC_print_trace_inner(gc_no);
     READER_UNLOCK();
-}
-
+  }
 #endif /* TRACE_BUF */
 
 /* A version of GC_push_all that treats all interior pointers as valid  */
@@ -1927,7 +1939,7 @@ STATIC void GC_push_marked(struct hblk *h, const hdr *hhdr)
 #   endif
     default:
       lim = sz > MAXOBJBYTES ? h -> hb_body
-                        : (ptr_t)((word)(h + 1) -> hb_body - sz);
+                : CAST_THRU_UINTPTR(ptr_t, (h + 1) -> hb_body) - sz;
       mark_stack_top = GC_mark_stack_top;
       for (p = h -> hb_body, bit_no = 0; ADDR_GE(lim, p);
            p += sz, bit_no += MARK_BIT_OFFSET(sz)) {
@@ -1967,7 +1979,7 @@ STATIC void GC_push_marked(struct hblk *h, const hdr *hhdr)
 #   endif
     GC_objects_are_marked = TRUE;
     lim = sz > MAXOBJBYTES ? h -> hb_body
-                        : (ptr_t)((word)(h + 1) -> hb_body - sz);
+                : CAST_THRU_UINTPTR(ptr_t, (h + 1) -> hb_body) - sz;
     mark_stack_top = GC_mark_stack_top;
     for (p = h -> hb_body; ADDR_GE(lim, p); p += sz) {
       if ((*(word *)p & 0x3) != 0) {
@@ -2012,7 +2024,7 @@ STATIC struct hblk * GC_push_next_marked(struct hblk *h)
     if (EXPECT(IS_FORWARDING_ADDR_OR_NIL(hhdr) || HBLK_IS_FREE(hhdr), FALSE)) {
       h = GC_next_block(h, FALSE);
       if (NULL == h) return NULL;
-      hhdr = GC_find_header((ptr_t)h);
+      hhdr = GC_find_header(h);
     } else {
 #     ifdef LINT2
         if (NULL == h) ABORT("Bad HDR() definition");
@@ -2036,7 +2048,7 @@ STATIC struct hblk * GC_push_next_marked(struct hblk *h)
                  || HBLK_IS_FREE(hhdr), FALSE)) {
         h = GC_next_block(h, FALSE);
         if (NULL == h) return NULL;
-        hhdr = GC_find_header((ptr_t)h);
+        hhdr = GC_find_header(h);
       } else {
 #       ifdef LINT2
           if (NULL == h) ABORT("Bad HDR() definition");
@@ -2075,7 +2087,7 @@ STATIC struct hblk * GC_push_next_marked_uncollectable(struct hblk *h)
                    || HBLK_IS_FREE(hhdr), FALSE)) {
           h = GC_next_block(h, FALSE);
           if (NULL == h) return NULL;
-          hhdr = GC_find_header((ptr_t)h);
+          hhdr = GC_find_header(h);
         } else {
 #         ifdef LINT2
             if (NULL == h) ABORT("Bad HDR() definition");

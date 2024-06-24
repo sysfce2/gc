@@ -181,13 +181,13 @@ STATIC ptr_t GC_reclaim_clear(struct hblk *hbp, const hdr *hhdr, word sz,
     word bit_no;
     ptr_t p, plim;
 
-    GC_ASSERT(hhdr == GC_find_header((ptr_t)hbp));
+    GC_ASSERT(hhdr == GC_find_header(hbp));
 #   ifndef THREADS
       GC_ASSERT(sz == hhdr -> hb_sz);
 #   else
       /* Skip the assertion because of a potential race with GC_realloc. */
 #   endif
-    GC_ASSERT((sz & (BYTES_PER_WORD-1)) == 0);
+    GC_ASSERT((sz & (sizeof(word)-1)) == 0);
 
     /* Go through all objects in the block. */
     p = hbp -> hb_body;
@@ -310,7 +310,7 @@ GC_INNER ptr_t GC_reclaim_generic(struct hblk *hbp, hdr *hhdr, size_t sz,
 #   ifndef PARALLEL_MARK
       GC_ASSERT(I_HOLD_LOCK());
 #   endif
-    GC_ASSERT(GC_find_header((ptr_t)hbp) == hhdr);
+    GC_ASSERT(GC_find_header(hbp) == hhdr);
 #   ifndef GC_DISABLE_INCREMENTAL
       GC_remove_protection(hbp, 1, IS_PTRFREE_SAFE(hhdr));
 #   endif
@@ -383,22 +383,22 @@ STATIC void GC_reclaim_small_nonempty_block(struct hblk *hbp, word sz,
   }
 #endif /* ENABLE_DISCLAIM */
 
-/*
- * Restore an unmarked large object or an entirely empty blocks of small objects
- * to the heap block free list.
- * Otherwise enqueue the block for later processing
- * by GC_reclaim_small_nonempty_block.
- * If report_if_found is TRUE, then process any block immediately, and
- * simply report free objects; do not actually reclaim them.
- */
+/* Restore an unmarked large object or an entirely empty blocks of      */
+/* small objects to the heap block free list.  Otherwise enqueue the    */
+/* block for later processing by GC_reclaim_small_nonempty_block.       */
+/* If report_if_found is TRUE, then process any block immediately, and  */
+/* simply report free objects; do not actually reclaim them.            */
 STATIC void GC_CALLBACK GC_reclaim_block(struct hblk *hbp,
-                                         GC_word report_if_found)
+                                         void *report_if_found)
 {
     hdr *hhdr;
     word sz;    /* size of objects in current block */
     struct obj_kind *ok;
 
     GC_ASSERT(I_HOLD_LOCK());
+#   if defined(CPPCHECK)
+        GC_noop1_ptr(report_if_found);
+#   endif
     hhdr = HDR(hbp);
     ok = &GC_obj_kinds[hhdr -> hb_obj_kind];
 #   ifdef AO_HAVE_load
@@ -569,7 +569,7 @@ unsigned GC_n_set_marks(const hdr *hhdr)
       }
 #   else
 
-      for (i = 0; i < MARK_BITS_SZ; i++) {
+      for (i = 0; i < HB_MARKS_SZ; i++) {
           result += count_ones(hhdr -> hb_marks[i]);
       }
 #   endif
@@ -591,12 +591,11 @@ unsigned GC_n_set_marks(const hdr *hhdr)
 #endif /* !USE_MARK_BYTES  */
 
 GC_API unsigned GC_CALL GC_count_set_marks_in_hblk(const void *p) {
-    return GC_n_set_marks(HDR((/* no const */ void *)(word)p));
+    return GC_n_set_marks(HDR(p));
 }
 
-STATIC void GC_CALLBACK GC_print_block_descr(struct hblk *h,
-                                GC_word /* struct PrintStats */ raw_ps)
-{
+  STATIC void GC_CALLBACK GC_print_block_descr(struct hblk *h, void *raw_ps)
+  {
     const hdr *hhdr = HDR(h);
     word sz = hhdr -> hb_sz;
     struct Print_stats *ps = (struct Print_stats *)raw_ps;
@@ -606,26 +605,29 @@ STATIC void GC_CALLBACK GC_print_block_descr(struct hblk *h,
 #   ifndef PARALLEL_MARK
         GC_ASSERT(hhdr -> hb_n_marks == n_marks);
 #   endif
+#   if defined(CPPCHECK)
+        GC_noop1_ptr(h);
+#   endif
     GC_ASSERT((n_objs > 0 ? n_objs : 1) >= n_marks);
     GC_printf("%u,%u,%u,%u\n",
               hhdr -> hb_obj_kind, (unsigned)sz, n_marks, n_objs);
     ps -> number_of_blocks++;
     ps -> total_bytes +=
                 (sz + HBLKSIZE-1) & ~(word)(HBLKSIZE-1); /* round up */
-}
+  }
 
-void GC_print_block_list(void)
-{
+  void GC_print_block_list(void)
+  {
     struct Print_stats pstats;
 
     GC_printf("kind(0=ptrfree/1=normal/2=unc.),"
               "obj_sz,#marks_set,#objs_in_block\n");
     BZERO(&pstats, sizeof(pstats));
-    GC_apply_to_all_blocks(GC_print_block_descr, (word)&pstats);
+    GC_apply_to_all_blocks(GC_print_block_descr, &pstats);
     GC_printf("blocks= %lu, total_bytes= %lu\n",
               (unsigned long)pstats.number_of_blocks,
               (unsigned long)pstats.total_bytes);
-}
+  }
 
 GC_API void GC_CALL GC_print_free_list(int k, size_t lg)
 {
@@ -663,7 +665,7 @@ STATIC void GC_clear_fl_links(void **flp)
 
 /*
  * Perform GC_reclaim_block on the entire heap, after first clearing
- * small object free lists (if we are not just looking for leaks).
+ * small-object free lists (if we are not just looking for leaks).
  */
 GC_INNER void GC_start_reclaim(GC_bool report_if_found)
 {
@@ -697,15 +699,15 @@ GC_INNER void GC_start_reclaim(GC_bool report_if_found)
                 }
               }
             }
-        } /* otherwise free list objects are marked,    */
+        } /* otherwise free-list objects are marked,    */
           /* and it's safe to leave them.               */
         BZERO(rlist, (MAXOBJGRANULES + 1) * sizeof(void *));
       }
 
 
-  /* Go through all heap blocks (in hblklist) and reclaim unmarked objects */
-  /* or enqueue the block for later processing.                            */
-    GC_apply_to_all_blocks(GC_reclaim_block, (word)report_if_found);
+    /* Go through all heap blocks (in hblklist) and reclaim unmarked    */
+    /* objects or enqueue the block for later processing.               */
+    GC_apply_to_all_blocks(GC_reclaim_block, (void *)(word)report_if_found);
 
 # ifdef EAGER_SWEEP
     /* This is a very stupid thing to do.  We make it possible anyway,  */
@@ -841,10 +843,12 @@ struct enumerate_reachable_s {
 };
 
 STATIC void GC_CALLBACK GC_do_enumerate_reachable_objects(struct hblk *hbp,
-                                                          GC_word ped)
+                                                          void *ed_ptr)
 {
   const hdr *hhdr = HDR(hbp);
   ptr_t p, plim;
+  const struct enumerate_reachable_s *ped
+                        = (struct enumerate_reachable_s *)ed_ptr;
   size_t sz = (size_t)(hhdr -> hb_sz);
   size_t bit_no;
 
@@ -859,8 +863,7 @@ STATIC void GC_CALLBACK GC_do_enumerate_reachable_objects(struct hblk *hbp,
   /* Go through all objects in the block. */
   for (bit_no = 0; ADDR_GE(plim, p); bit_no += MARK_BIT_OFFSET(sz), p += sz) {
     if (mark_bit_from_hdr(hhdr, bit_no)) {
-      ((struct enumerate_reachable_s *)ped)->proc(p, sz,
-                        ((struct enumerate_reachable_s *)ped)->client_data);
+      ped -> proc(p, sz, ped -> client_data);
     }
   }
 }
@@ -874,5 +877,5 @@ GC_API void GC_CALL GC_enumerate_reachable_objects_inner(
   GC_ASSERT(I_HOLD_READER_LOCK());
   ed.proc = proc;
   ed.client_data = client_data;
-  GC_apply_to_all_blocks(GC_do_enumerate_reachable_objects, (word)&ed);
+  GC_apply_to_all_blocks(GC_do_enumerate_reachable_objects, &ed);
 }
